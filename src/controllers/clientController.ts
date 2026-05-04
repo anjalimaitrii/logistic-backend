@@ -99,7 +99,14 @@ export const loginClient = async (req: Request, res: Response): Promise<void> =>
 
 export const getClients = async (req: Request, res: Response): Promise<void> => {
   try {
-    const clients = await Client.find().select("-password").populate("company").sort({ createdAt: -1 });
+    const companyId = req.query.companyId as string;
+    const filter = companyId ? { company: companyId } : {};
+    
+    const clients = await Client.find(filter)
+      .select("-password")
+      .populate("company")
+      .sort({ createdAt: -1 });
+      
     res.status(200).json(clients);
   } catch (error: any) {
     res.status(500).json({

@@ -34,8 +34,15 @@ export const getBookings = async (req: Request, res: Response): Promise<void> =>
     const clientId = req.query.clientId as string;
     const filter = clientId ? { clientId } : {};
 
-    const bookings = await Booking.find(filter)
-      .populate("clientId", "name email contact")
+    const bookings = await Booking.find()
+      .populate({
+        path: "clientId",
+        select: "name email contact company",
+        populate: {
+          path: "company",
+          select: "companyName cinNumber"
+        }
+      })
       .sort({ createdAt: -1 });
 
     res.status(200).json(bookings);
