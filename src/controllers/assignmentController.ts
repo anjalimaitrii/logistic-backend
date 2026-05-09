@@ -4,7 +4,7 @@ import Booking from "../models/Booking.js";
 
 export const createAssignment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { bookingId, driverName, truckNumber, truckHealth, collectionArea } = req.body;
+    const { bookingId, truckId, driverId, driverName, truckNumber, truckHealth, collectionArea } = req.body;
 
     // Check if assignment already exists
     const existing = await Assignment.findOne({ bookingId });
@@ -15,6 +15,8 @@ export const createAssignment = async (req: Request, res: Response): Promise<voi
 
     const newAssignment = new Assignment({
       bookingId,
+      truckId,
+      driverId,
       driverName,
       truckNumber,
       truckHealth,
@@ -22,6 +24,18 @@ export const createAssignment = async (req: Request, res: Response): Promise<voi
     });
 
     const savedAssignment = await newAssignment.save();
+
+    // Log to Booking Timeline
+    await Booking.findByIdAndUpdate(bookingId, {
+      $push: {
+        timeline: {
+          title: "Driver Assigned",
+          description: `Driver ${driverName} assigned with Truck ${truckNumber}`,
+          time: new Date(),
+          status: "completed"
+        }
+      }
+    });
 
     res.status(201).json({
       message: "Job assigned successfully",
@@ -58,11 +72,11 @@ export const getAssignmentByBookingId = async (req: Request, res: Response): Pro
 export const updateAssignment = async (req: Request, res: Response): Promise<void> => {
   try {
     const { bookingId } = req.params;
-    const { driverName, truckNumber, truckHealth, collectionArea } = req.body;
+    const { driverName, driverId, truckId, truckNumber, truckHealth, collectionArea } = req.body;
 
     const assignment = await Assignment.findOneAndUpdate(
       { bookingId },
-      { driverName, truckNumber, truckHealth, collectionArea },
+      { driverName, driverId, truckId, truckNumber, truckHealth, collectionArea },
       { new: true }
     );
 
@@ -77,5 +91,25 @@ export const updateAssignment = async (req: Request, res: Response): Promise<voi
     });
   } catch (error: any) {
     res.status(500).json({ message: "Error updating assignment", error: error.message });
+  }
+};
+
+export const getAssignmentsByTruck = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { truckId } = req.params;
+    const assignments = await Assignment.find({ truckId }).populate("bookingId");
+    res.status(200).json(assignments);
+  } catch (error: any) {
+    res.status(500).json({ message: "Error fetching assignments for truck", error: error.message });
+  }
+};
+
+export const getAssignmentsByDriver = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { driverId } = req.params;
+    const assignments = await Assignment.find({ driverId }).populate("bookingId");
+    res.status(200).json(assignments);
+  } catch (error: any) {
+    res.status(500).json({ message: "Error fetching assignments for driver", error: error.message });
   }
 };

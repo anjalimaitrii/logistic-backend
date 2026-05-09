@@ -1,24 +1,58 @@
 import { Request, Response } from "express";
 import Settlement from "../models/Settlement.js";
+import Booking from "../models/Booking.js";
 
 export const createOrUpdateSettlement = async (req: Request, res: Response): Promise<void> => {
   try {
     const { bookingId, assignmentId, fuelDetails, expenses, financials } = req.body;
 
-    // Calculate total distance for record keeping
-    const totalDistance = (Number(fuelDetails.pickupKm) || 0) + (Number(fuelDetails.dropoffKm) || 0);
+    const updateData: any = {};
+    if (assignmentId) updateData.assignmentId = assignmentId;
+    if (expenses) updateData.expenses = expenses;
+    if (financials) updateData.financials = financials;
+    
+    if (fuelDetails) {
+      const totalDistance = (Number(fuelDetails.pickupKm) || 0) + (Number(fuelDetails.dropoffKm) || 0);
+      updateData.fuelDetails = { ...fuelDetails, totalDistance };
+    }
+
+    updateData.status = "Approved";
 
     const settlement = await Settlement.findOneAndUpdate(
-      { bookingId },
-      {
-        assignmentId,
-        fuelDetails: { ...fuelDetails, totalDistance },
-        expenses,
-        financials,
-        status: "Approved"
-      },
-      { new: true, upsert: true }
-    );
+       { bookingId },
+       { $set: updateData },
+       { new: true, upsert: true }
+     );
+
+    // Update Journey Timeline in Booking
+    if (financials && financials.advancePaid) {
+      await Booking.findByIdAndUpdate(bookingId, {
+        $push: {
+          timeline: {
+            title: "Trip Approved",
+            description: `Accountant approved trip with ₦${financials.advancePaid.toLocaleString()} allocation`,
+            time: new Date(),
+            status: "completed"
+          }
+        }
+      });
+    }
+
+    if (expenses && expenses.length > 0) {
+      const fuelExp = expenses.filter((e: any) => e.category === "Fuel").pop();
+      if (fuelExp) {
+        await Booking.findByIdAndUpdate(bookingId, {
+          $push: {
+            timeline: {
+              title: "Petrol Refilled",
+              description: `Refilled ${fuelExp.litres}L at ${fuelExp.description || "Station"}`,
+              time: new Date(),
+              status: "completed"
+            }
+          }
+        });
+      }
+    }
 
     res.status(200).json({
       message: "Settlement processed successfully",

@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface IBooking extends Document {
+  jobId: string;
   clientId?: mongoose.Types.ObjectId;
   cargoDetails: {
     goodsType: string;
@@ -36,6 +37,12 @@ export interface IBooking extends Document {
   advancePaid?: number;
   specialRequest?: string;
   status: string;
+  timeline: Array<{
+    title: string;
+    description: string;
+    time: Date;
+    status: string;
+  }>;
 
   metadata: {
     source: string;
@@ -47,6 +54,7 @@ export interface IBooking extends Document {
 
 const BookingSchema: Schema = new Schema(
   {
+    jobId: { type: String, unique: true, sparse: true },
     clientId: { type: Schema.Types.ObjectId, ref: "Client" },
     cargoDetails: {
       goodsType: { type: String, required: true },
@@ -82,6 +90,14 @@ const BookingSchema: Schema = new Schema(
     advancePaid: { type: Number },
     specialRequest: { type: String },
     status: { type: String, default: "pending" },
+    timeline: [
+      {
+        title: { type: String },
+        description: { type: String },
+        time: { type: Date, default: Date.now },
+        status: { type: String, default: "completed" }
+      }
+    ],
 
     metadata: {
       source: { type: String, default: "webapp_client" },
