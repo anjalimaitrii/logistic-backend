@@ -37,6 +37,7 @@ export interface IBooking extends Document {
   advancePaid?: number;
   specialRequest?: string;
   status: string;
+  tripStatus?: string;
   addressHistory: Array<{
     type: string; // pickup or dropoff
     oldAddress: {
@@ -100,6 +101,7 @@ const BookingSchema: Schema = new Schema(
     advancePaid: { type: Number },
     specialRequest: { type: String },
     status: { type: String, default: "pending" },
+    tripStatus: { type: String },
     addressHistory: [
       {
         type: { type: String }, // pickup or dropoff

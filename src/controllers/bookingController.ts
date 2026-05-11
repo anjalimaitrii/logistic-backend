@@ -92,22 +92,26 @@ export const getBookingById = async (req: Request, res: Response): Promise<void>
 export const updateBookingStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { status, finalAmount, advancePaid, specialRequest, assignment } = req.body;
+    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment } = req.body;
 
     const updateData: any = {};
     if (status) updateData.status = status;
+    if (tripStatus) updateData.tripStatus = tripStatus;
     if (finalAmount !== undefined) updateData.finalAmount = finalAmount;
     if (advancePaid !== undefined) updateData.advancePaid = advancePaid;
     if (specialRequest !== undefined) updateData.specialRequest = specialRequest;
     if (assignment !== undefined) updateData.assignment = assignment;
 
-    // Construct timeline event if status is updated (skip 'finalized' as it's logged as 'Trip Approved')
+    // Construct timeline event if status or tripStatus is updated
     const timelineUpdate: any = {};
-    if (status && status.toLowerCase() !== "finalized") {
+    const displayStatus = tripStatus || status;
+    
+    // Skip 'finalized' as it's usually logged separately as 'Trip Approved'
+    if (displayStatus && displayStatus.toLowerCase() !== "finalized") {
       timelineUpdate.$push = {
         timeline: {
-          title: status.charAt(0).toUpperCase() + status.slice(1),
-          description: `Status updated to ${status}`,
+          title: displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1),
+          description: `Trip status updated to ${displayStatus}`,
           time: new Date(),
           status: "completed"
         }
