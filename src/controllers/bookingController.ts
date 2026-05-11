@@ -164,3 +164,128 @@ export const updateBooking = async (req: Request, res: Response): Promise<void> 
     });
   }
 };
+
+export const changeDropoffAddress = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { newPickup, newDropoff, reason, financials } = req.body;
+
+    const booking = await Booking.findById(id);
+    if (!booking) {
+      res.status(404).json({ message: "Booking not found" });
+      return;
+    }
+
+    const setData: any = {};
+    const historyPushes: any[] = [];
+    let timelineDesc = "Address updated:";
+
+    // Handle Pickup Change
+    if (newPickup) {
+      const isPickupChanged =
+        newPickup.address?.city !== booking.pickup.address?.city ||
+        newPickup.address?.street !== booking.pickup.address?.street;
+
+      if (isPickupChanged) {
+        historyPushes.push({
+          type: "pickup",
+          oldAddress: {
+            contactPerson: booking.pickup.contactPerson,
+            contactNumber: booking.pickup.contactNumber,
+            address: { ...booking.pickup.address }
+          },
+          changedAt: new Date(),
+          reason: reason || "Operational adjustment"
+        });
+        timelineDesc += ` [Pickup: ${booking.pickup.address?.city} -> ${newPickup.address?.city}]`;
+      }
+
+      setData["pickup.contactPerson"] = newPickup.contactPerson || booking.pickup.contactPerson;
+      setData["pickup.contactNumber"] = newPickup.contactNumber || booking.pickup.contactNumber;
+      setData["pickup.address.plotNo"] = newPickup.address?.plotNo || "";
+      setData["pickup.address.street"] = newPickup.address?.street || "";
+      setData["pickup.address.city"] = newPickup.address?.city || "";
+      setData["pickup.address.pincode"] = newPickup.address?.pincode || "";
+    }
+
+    // Handle Dropoff Change
+    if (newDropoff) {
+      const isDropoffChanged =
+        newDropoff.address?.city !== booking.dropoff.address?.city ||
+        newDropoff.address?.street !== booking.dropoff.address?.street;
+
+      if (isDropoffChanged) {
+        historyPushes.push({
+          type: "dropoff",
+          oldAddress: {
+            contactPerson: booking.dropoff.contactPerson,
+            contactNumber: booking.dropoff.contactNumber,
+            address: { ...booking.dropoff.address }
+          },
+          changedAt: new Date(),
+          reason: reason || "Client request"
+        });
+        timelineDesc += ` [Dropoff: ${booking.dropoff.address?.city} -> ${newDropoff.address?.city}]`;
+      }
+
+      setData["dropoff.contactPerson"] = newDropoff.contactPerson || booking.dropoff.contactPerson;
+      setData["dropoff.contactNumber"] = newDropoff.contactNumber || booking.dropoff.contactNumber;
+      setData["dropoff.address.plotNo"] = newDropoff.address?.plotNo || "";
+      setData["dropoff.address.street"] = newDropoff.address?.street || "";
+      setData["dropoff.address.city"] = newDropoff.address?.city || "";
+      setData["dropoff.address.pincode"] = newDropoff.address?.pincode || "";
+    }
+
+    // Update finalAmount if provided
+    if (financials?.newFinalAmount) {
+      setData.finalAmount = financials.newFinalAmount;
+    }
+
+    const updateQuery: any = { $set: setData };
+    if (historyPushes.length > 0) {
+      updateQuery.$push = {
+        addressHistory: { $each: historyPushes },
+        timeline: {
+          title: "Address Changed",
+          description: `${timelineDesc}. New Dist: ${financials?.newPickupKm || 0} (P) + ${financials?.newDropoffKm || 0} (D) KM. Reason: ${reason || "Update"}`,
+          time: new Date(),
+          status: "completed"
+        }
+      };
+    }
+
+    const updatedBooking = await Booking.findByIdAndUpdate(
+      id,
+      updateQuery,
+      { new: true }
+    );
+
+    // Update Settlement pickupKm and dropoffKm if financials provided
+    if (financials?.newPickupKm !== undefined || financials?.newDropoffKm !== undefined) {
+      const Settlement = (await import("../models/Settlement.js")).default;
+      const totalDist = (Number(financials?.newPickupKm) || 0) + (Number(financials?.newDropoffKm) || 0);
+
+      await Settlement.findOneAndUpdate(
+        { bookingId: id },
+        {
+          $set: {
+            "fuelDetails.pickupKm": Number(financials?.newPickupKm) || 0,
+            "fuelDetails.dropoffKm": Number(financials?.newDropoffKm) || 0,
+            "fuelDetails.totalDistance": totalDist
+          }
+        },
+        { upsert: true }
+      );
+    }
+
+    res.status(200).json({
+      message: "Job addresses updated successfully",
+      booking: updatedBooking
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      message: "Error changing job addresses",
+      error: error.message,
+    });
+  }
+};

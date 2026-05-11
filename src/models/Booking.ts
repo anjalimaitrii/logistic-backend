@@ -37,6 +37,16 @@ export interface IBooking extends Document {
   advancePaid?: number;
   specialRequest?: string;
   status: string;
+  addressHistory: Array<{
+    type: string; // pickup or dropoff
+    oldAddress: {
+      contactPerson: string;
+      contactNumber: string;
+      address: { plotNo: string; street: string; city: string; pincode: string; };
+    };
+    changedAt: Date;
+    reason: string;
+  }>;
   timeline: Array<{
     title: string;
     description: string;
@@ -90,6 +100,23 @@ const BookingSchema: Schema = new Schema(
     advancePaid: { type: Number },
     specialRequest: { type: String },
     status: { type: String, default: "pending" },
+    addressHistory: [
+      {
+        type: { type: String }, // pickup or dropoff
+        oldAddress: {
+          contactPerson: { type: String },
+          contactNumber: { type: String },
+          address: {
+            plotNo: { type: String },
+            street: { type: String },
+            city: { type: String },
+            pincode: { type: String }
+          }
+        },
+        changedAt: { type: Date, default: Date.now },
+        reason: { type: String }
+      }
+    ],
     timeline: [
       {
         title: { type: String },
