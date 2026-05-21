@@ -2,14 +2,18 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface ISettlement extends Document {
   bookingId: mongoose.Types.ObjectId;
-  assignmentId: mongoose.Types.ObjectId;
   fuelDetails: {
-    pickupKm: number;
-    pickupMileage: number;
-    dropoffKm: number;
-    dropoffMileage: number;
+    legs: Array<{
+      from: string;
+      to: string;
+      km: number;
+      mileage: number;
+      liters: number;
+      amount: number;
+    }>;
     fuelRate: number;
     totalDistance: number;
+    totalLiters: number;
   };
   expenses: Array<{
     description: string;
@@ -18,23 +22,29 @@ export interface ISettlement extends Document {
     date: string;
   }>;
   financials: {
-    advancePaid: number;
-    grandTotal: number;
+    cashAllocation: number;
+    fuelTotal: number;
   };
-  status: string; // e.g., "Pending", "Settled"
+  status: string;
 }
 
 const SettlementSchema: Schema = new Schema(
   {
     bookingId: { type: Schema.Types.ObjectId, ref: "Booking", required: true, unique: true },
-    assignmentId: { type: Schema.Types.ObjectId, ref: "Assignment", required: true },
     fuelDetails: {
-      pickupKm: { type: Number, default: 0 },
-      pickupMileage: { type: Number, default: 0 },
-      dropoffKm: { type: Number, default: 0 },
-      dropoffMileage: { type: Number, default: 0 },
+      legs: [
+        {
+          from: { type: String, default: "" },
+          to: { type: String, default: "" },
+          km: { type: Number, default: 0 },
+          mileage: { type: Number, default: 4 },
+          liters: { type: Number, default: 0 },
+          amount: { type: Number, default: 0 }
+        }
+      ],
       fuelRate: { type: Number, default: 0 },
-      totalDistance: { type: Number, default: 0 }
+      totalDistance: { type: Number, default: 0 },
+      totalLiters: { type: Number, default: 0 }
     },
     expenses: [
       {
@@ -45,8 +55,8 @@ const SettlementSchema: Schema = new Schema(
       }
     ],
     financials: {
-      advancePaid: { type: Number, default: 0 },
-      grandTotal: { type: Number, default: 0 }
+      cashAllocation: { type: Number, default: 0 },
+      fuelTotal: { type: Number, default: 0 }
     },
     status: { type: String, default: "Approved" }
   },

@@ -1,5 +1,18 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export interface LocationStop {
+  sequence: number;
+  contactPerson: string;
+  contactNumber: string;
+  address: {
+    plotNo: string;
+    street: string;
+    city: string;
+    pincode: string;
+  };
+  gpsEnabled: boolean;
+}
+
 export interface IBooking extends Document {
   jobId: string;
   clientId?: mongoose.Types.ObjectId;
@@ -8,28 +21,8 @@ export interface IBooking extends Document {
     weight: number;
     loadingDate: string;
   };
-  pickup: {
-    contactPerson: string;
-    contactNumber: string;
-    address: {
-      plotNo: string;
-      street: string;
-      city: string;
-      pincode: string;
-    };
-    gpsEnabled: boolean;
-  };
-  dropoff: {
-    contactPerson: string;
-    contactNumber: string;
-    address: {
-      plotNo: string;
-      street: string;
-      city: string;
-      pincode: string;
-    };
-    gpsEnabled: boolean;
-  };
+  pickupLocations: LocationStop[];
+  dropoffLocations: LocationStop[];
   requirement: {
     bodyType: string;
   };
@@ -63,6 +56,19 @@ export interface IBooking extends Document {
   updatedAt: Date;
 }
 
+const LocationStopSchema = new Schema({
+  sequence: { type: Number, required: true },
+  contactPerson: { type: String },
+  contactNumber: { type: String, required: true },
+  address: {
+    plotNo: { type: String },
+    street: { type: String },
+    city: { type: String },
+    pincode: { type: String },
+  },
+  gpsEnabled: { type: Boolean, default: false },
+}, { _id: false });
+
 const BookingSchema: Schema = new Schema(
   {
     jobId: { type: String, unique: true, sparse: true },
@@ -72,28 +78,8 @@ const BookingSchema: Schema = new Schema(
       weight: { type: Number },
       loadingDate: { type: String },
     },
-    pickup: {
-      contactPerson: { type: String },
-      contactNumber: { type: String, required: true },
-      address: {
-        plotNo: { type: String },
-        street: { type: String },
-        city: { type: String },
-        pincode: { type: String },
-      },
-      gpsEnabled: { type: Boolean, default: false },
-    },
-    dropoff: {
-      contactPerson: { type: String },
-      contactNumber: { type: String, required: true },
-      address: {
-        plotNo: { type: String },
-        street: { type: String },
-        city: { type: String },
-        pincode: { type: String },
-      },
-      gpsEnabled: { type: Boolean, default: false },
-    },
+    pickupLocations: [LocationStopSchema],
+    dropoffLocations: [LocationStopSchema],
     requirement: {
       bodyType: { type: String },
     },

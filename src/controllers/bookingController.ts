@@ -3,7 +3,17 @@ import Booking from "../models/Booking.js";
 
 export const createBooking = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { cargoDetails, pickup, dropoff, requirement, status, metadata, clientId } = req.body;
+    const {
+      cargoDetails,
+      pickupLocations,
+      dropoffLocations,
+      pickup,
+      dropoff,
+      requirement,
+      status,
+      metadata,
+      clientId,
+    } = req.body;
 
     // Generate sequential Job ID
     const lastBooking = await Booking.findOne().sort({ createdAt: -1 }).select("jobId");
@@ -14,22 +24,66 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
     }
     const jobId = `JOB-${String(nextNumber).padStart(3, "0")}`;
 
-    const newBooking = new Booking({
+    const bookingData: any = {
       jobId,
       clientId,
       cargoDetails,
-      pickup,
-      dropoff,
       requirement,
       status: status || "pending",
-      timeline: [{
-        title: "Booking Created",
-        description: "Customer initiated the booking request through the portal",
-        time: new Date(),
-        status: "completed"
-      }],
+      timeline: [
+        {
+          title: "Booking Created",
+          description: "Booking created successfully",
+          time: new Date(),
+          status: "completed",
+        },
+      ],
       metadata,
-    });
+    };
+
+    if (Array.isArray(pickupLocations) && pickupLocations.length > 0) {
+      bookingData.pickupLocations = pickupLocations;
+    } else if (pickup) {
+      bookingData.pickupLocations = [
+        {
+          sequence: 1,
+          contactPerson: pickup.contactPerson,
+          contactNumber: pickup.contactNumber,
+          address: pickup.address,
+          gpsEnabled: pickup.gpsEnabled ?? false,
+        },
+      ];
+    }
+
+    if (Array.isArray(dropoffLocations) && dropoffLocations.length > 0) {
+      bookingData.dropoffLocations = dropoffLocations;
+    } else if (dropoff) {
+      bookingData.dropoffLocations = [
+        {
+          sequence: 1,
+          contactPerson: dropoff.contactPerson,
+          contactNumber: dropoff.contactNumber,
+          address: dropoff.address,
+          gpsEnabled: dropoff.gpsEnabled ?? false,
+        },
+      ];
+    }
+
+    if (!Array.isArray(bookingData.pickupLocations) || bookingData.pickupLocations.length === 0) {
+      res.status(400).json({
+        message: "At least one pickup location is required",
+      });
+      return;
+    }
+
+    if (!Array.isArray(bookingData.dropoffLocations) || bookingData.dropoffLocations.length === 0) {
+      res.status(400).json({
+        message: "At least one dropoff location is required",
+      });
+      return;
+    }
+
+    const newBooking = new Booking(bookingData);
 
     const savedBooking = await newBooking.save();
 
@@ -50,7 +104,7 @@ export const getBookings = async (req: Request, res: Response): Promise<void> =>
     const clientId = req.query.clientId as string;
     const filter = clientId ? { clientId } : {};
 
-    const bookings = await Booking.find()
+    const bookings = await Booking.find(filter)
       .populate({
         path: "clientId",
         select: "name email contact company",
@@ -180,64 +234,67 @@ export const changeDropoffAddress = async (req: Request, res: Response): Promise
       return;
     }
 
+    const currentPickup = booking.pickupLocations?.[0];
+    const currentDropoff = booking.dropoffLocations?.[0];
+
     const setData: any = {};
     const historyPushes: any[] = [];
     let timelineDesc = "Address updated:";
 
     // Handle Pickup Change
-    if (newPickup) {
+    if (newPickup && currentPickup) {
       const isPickupChanged =
-        newPickup.address?.city !== booking.pickup.address?.city ||
-        newPickup.address?.street !== booking.pickup.address?.street;
+        newPickup.address?.city !== currentPickup.address?.city ||
+        newPickup.address?.street !== currentPickup.address?.street;
 
       if (isPickupChanged) {
         historyPushes.push({
           type: "pickup",
           oldAddress: {
-            contactPerson: booking.pickup.contactPerson,
-            contactNumber: booking.pickup.contactNumber,
-            address: { ...booking.pickup.address }
+            contactPerson: currentPickup.contactPerson,
+            contactNumber: currentPickup.contactNumber,
+            address: { ...currentPickup.address }
           },
           changedAt: new Date(),
           reason: reason || "Operational adjustment"
         });
-        timelineDesc += ` [Pickup: ${booking.pickup.address?.city} -> ${newPickup.address?.city}]`;
+        timelineDesc += ` [Pickup: ${currentPickup.address?.city} -> ${newPickup.address?.city}]`;
       }
 
-      setData["pickup.contactPerson"] = newPickup.contactPerson || booking.pickup.contactPerson;
-      setData["pickup.contactNumber"] = newPickup.contactNumber || booking.pickup.contactNumber;
-      setData["pickup.address.plotNo"] = newPickup.address?.plotNo || "";
-      setData["pickup.address.street"] = newPickup.address?.street || "";
-      setData["pickup.address.city"] = newPickup.address?.city || "";
-      setData["pickup.address.pincode"] = newPickup.address?.pincode || "";
+      setData["pickupLocations.0.contactPerson"] = newPickup.contactPerson || currentPickup.contactPerson;
+      setData["pickupLocations.0.contactNumber"] = newPickup.contactNumber || currentPickup.contactNumber;
+      setData["pickupLocations.0.address.plotNo"] = newPickup.address?.plotNo || "";
+      setData["pickupLocations.0.address.street"] = newPickup.address?.street || "";
+      setData["pickupLocations.0.address.city"] = newPickup.address?.city || "";
+      setData["pickupLocations.0.address.pincode"] = newPickup.address?.pincode || "";
     }
 
     // Handle Dropoff Change
-    if (newDropoff) {
+    if (newDropoff && currentDropoff) {
       const isDropoffChanged =
-        newDropoff.address?.city !== booking.dropoff.address?.city ||
-        newDropoff.address?.street !== booking.dropoff.address?.street;
+        newDropoff.address?.city !== currentDropoff.address?.city ||
+        newDropoff.address?.street !== currentDropoff.address?.street;
 
       if (isDropoffChanged) {
         historyPushes.push({
           type: "dropoff",
           oldAddress: {
-            contactPerson: booking.dropoff.contactPerson,
-            contactNumber: booking.dropoff.contactNumber,
-            address: { ...booking.dropoff.address }
+            contactPerson: currentDropoff.contactPerson,
+            contactNumber: currentDropoff.contactNumber,
+            address: { ...currentDropoff.address }
           },
           changedAt: new Date(),
           reason: reason || "Client request"
         });
-        timelineDesc += ` [Dropoff: ${booking.dropoff.address?.city} -> ${newDropoff.address?.city}]`;
+        timelineDesc += ` [Dropoff: ${currentDropoff.address?.city} -> ${newDropoff.address?.city}]`;
       }
 
-      setData["dropoff.contactPerson"] = newDropoff.contactPerson || booking.dropoff.contactPerson;
-      setData["dropoff.contactNumber"] = newDropoff.contactNumber || booking.dropoff.contactNumber;
-      setData["dropoff.address.plotNo"] = newDropoff.address?.plotNo || "";
-      setData["dropoff.address.street"] = newDropoff.address?.street || "";
-      setData["dropoff.address.city"] = newDropoff.address?.city || "";
-      setData["dropoff.address.pincode"] = newDropoff.address?.pincode || "";
+      setData["dropoffLocations.0.contactPerson"] = newDropoff.contactPerson || currentDropoff.contactPerson;
+      setData["dropoffLocations.0.contactNumber"] = newDropoff.contactNumber || currentDropoff.contactNumber;
+      setData["dropoffLocations.0.address.plotNo"] = newDropoff.address?.plotNo || "";
+      setData["dropoffLocations.0.address.street"] = newDropoff.address?.street || "";
+      setData["dropoffLocations.0.address.city"] = newDropoff.address?.city || "";
+      setData["dropoffLocations.0.address.pincode"] = newDropoff.address?.pincode || "";
     }
 
     // Update finalAmount if provided

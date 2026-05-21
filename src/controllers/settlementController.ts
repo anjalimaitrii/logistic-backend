@@ -4,16 +4,22 @@ import Booking from "../models/Booking.js";
 
 export const createOrUpdateSettlement = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { bookingId, assignmentId, fuelDetails, expenses, financials } = req.body;
+    const { bookingId, fuelDetails, expenses, financials } = req.body;
 
     const updateData: any = {};
-    if (assignmentId) updateData.assignmentId = assignmentId;
     if (expenses) updateData.expenses = expenses;
     if (financials) updateData.financials = financials;
-    
+
     if (fuelDetails) {
-      const totalDistance = (Number(fuelDetails.pickupKm) || 0) + (Number(fuelDetails.dropoffKm) || 0);
-      updateData.fuelDetails = { ...fuelDetails, totalDistance };
+      const legs = Array.isArray(fuelDetails.legs) ? fuelDetails.legs : [];
+      const totalDistance = legs.reduce((sum: number, leg: any) => sum + (Number(leg.km) || 0), 0);
+      const totalLiters = legs.reduce((sum: number, leg: any) => sum + (Number(leg.liters) || 0), 0);
+      updateData.fuelDetails = {
+        legs,
+        fuelRate: fuelDetails.fuelRate,
+        totalDistance: Math.round(totalDistance),
+        totalLiters: Math.round(totalLiters * 10) / 10
+      };
     }
 
     updateData.status = "Approved";
@@ -25,12 +31,12 @@ export const createOrUpdateSettlement = async (req: Request, res: Response): Pro
      );
 
     // Update Journey Timeline in Booking
-    if (financials && financials.advancePaid) {
+    if (financials && financials.cashAllocation) {
       await Booking.findByIdAndUpdate(bookingId, {
         $push: {
           timeline: {
             title: "Trip Approved",
-            description: `Accountant approved trip with ₦${financials.advancePaid.toLocaleString()} allocation`,
+            description: `Accountant approved trip with ₦${Number(financials.cashAllocation).toLocaleString()} cash allocation`,
             time: new Date(),
             status: "completed"
           }
@@ -79,7 +85,7 @@ export const getSettlementByBookingId = async (req: Request, res: Response): Pro
 
 export const getAllSettlements = async (req: Request, res: Response): Promise<void> => {
   try {
-    const settlements = await Settlement.find().populate("bookingId").populate("assignmentId");
+    const settlements = await Settlement.find().populate("bookingId");
     res.status(200).json(settlements);
   } catch (error: any) {
     res.status(500).json({ message: "Error fetching settlements", error: error.message });
