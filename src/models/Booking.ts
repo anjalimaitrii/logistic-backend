@@ -14,7 +14,7 @@ export interface LocationStop {
 }
 
 export interface IBooking extends Document {
-  jobId: string;
+  tripId: string;
   clientId?: mongoose.Types.ObjectId;
   cargoDetails: {
     goodsType: string;
@@ -71,7 +71,7 @@ const LocationStopSchema = new Schema({
 
 const BookingSchema: Schema = new Schema(
   {
-    jobId: { type: String, unique: true, sparse: true },
+    tripId: { type: String, unique: true, sparse: true },
     clientId: { type: Schema.Types.ObjectId, ref: "Client" },
     cargoDetails: {
       goodsType: { type: String, required: true },

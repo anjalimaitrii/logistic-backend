@@ -15,17 +15,17 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       clientId,
     } = req.body;
 
-    // Generate sequential Job ID
-    const lastBooking = await Booking.findOne().sort({ createdAt: -1 }).select("jobId");
+    // Generate sequential Trip ID
+    const lastBooking = await Booking.findOne().sort({ createdAt: -1 }).select("tripId");
     let nextNumber = 1;
-    if (lastBooking?.jobId) {
-      const lastNum = parseInt(lastBooking.jobId.replace("JOB-", ""), 10);
+    if (lastBooking?.tripId) {
+      const lastNum = parseInt(lastBooking.tripId.replace("TRIP-", ""), 10);
       if (!isNaN(lastNum)) nextNumber = lastNum + 1;
     }
-    const jobId = `JOB-${String(nextNumber).padStart(3, "0")}`;
+    const tripId = `TRIP-${String(nextNumber).padStart(3, "0")}`;
 
     const bookingData: any = {
-      jobId,
+      tripId,
       clientId,
       cargoDetails,
       requirement,

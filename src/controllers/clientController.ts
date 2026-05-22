@@ -3,6 +3,12 @@ import Client from "../models/Client.js";
 import Company from "../models/Company.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { sendClientWelcomeEmail, sendOTPEmail } from "../services/emailService.js";
+
+// In-memory OTP store: email → { otp, expiresAt }
+const otpStore = new Map<string, { otp: string; expiresAt: number }>();
+
+const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
 export const createClient = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -15,6 +21,9 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    // Capture plain-text password before the pre-save hook hashes it
+    const plainPassword = password;
+
     const newClient = new Client({
       name,
       email,
@@ -22,7 +31,7 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
       designation,
       password,
       status,
-      company: company || undefined, // Set company if provided
+      company: company || undefined,
     });
 
     const savedClient = await newClient.save();
@@ -32,6 +41,14 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
       await Company.findByIdAndUpdate(company, {
         $addToSet: { clients: savedClient._id }
       });
+    }
+
+    // Send welcome email with credentials
+    try {
+      await sendClientWelcomeEmail({ toEmail: email, clientName: name, password: plainPassword });
+      console.log(`✅ Welcome email sent to ${email}`);
+    } catch (emailErr: any) {
+      console.error(`❌ Welcome email FAILED for ${email}:`, emailErr?.message || emailErr);
     }
 
     // Remove password from response
@@ -140,5 +157,65 @@ export const updateClientPassword = async (req: Request, res: Response): Promise
     res.status(200).json({ message: "Password updated successfully" });
   } catch (error: any) {
     res.status(500).json({ message: "Password update failed", error: error.message });
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email } = req.body;
+    if (!email) { res.status(400).json({ message: "Email is required" }); return; }
+
+    const client = await Client.findOne({ email });
+    if (!client) { res.status(404).json({ message: "No account found with this email" }); return; }
+
+    const otp = generateOTP();
+    otpStore.set(email, { otp, expiresAt: Date.now() + 10 * 60 * 1000 }); // 10 min
+
+    await sendOTPEmail({ toEmail: email, clientName: client.name, otp });
+    console.log(`✅ OTP sent to ${email}: ${otp}`);
+
+    res.status(200).json({ message: "OTP sent to your email" });
+  } catch (error: any) {
+    console.error("forgotPassword error:", error.message);
+    res.status(500).json({ message: "Failed to send OTP", error: error.message });
+  }
+};
+
+export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, otp } = req.body;
+    const record = otpStore.get(email);
+
+    if (!record)                      { res.status(400).json({ message: "OTP not found. Please request again." }); return; }
+    if (Date.now() > record.expiresAt) { otpStore.delete(email); res.status(400).json({ message: "OTP expired. Please request again." }); return; }
+    if (record.otp !== otp)           { res.status(400).json({ message: "Invalid OTP" }); return; }
+
+    res.status(200).json({ message: "OTP verified" });
+  } catch (error: any) {
+    res.status(500).json({ message: "OTP verification failed", error: error.message });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!newPassword || newPassword.length < 8) { res.status(400).json({ message: "Password must be at least 8 characters" }); return; }
+
+    const record = otpStore.get(email);
+    if (!record)                       { res.status(400).json({ message: "OTP not found. Please request again." }); return; }
+    if (Date.now() > record.expiresAt) { otpStore.delete(email); res.status(400).json({ message: "OTP expired. Please request again." }); return; }
+    if (record.otp !== otp)            { res.status(400).json({ message: "Invalid OTP" }); return; }
+
+    const client = await Client.findOne({ email });
+    if (!client) { res.status(404).json({ message: "Client not found" }); return; }
+
+    client.password = newPassword;
+    client.mustChangePassword = false;
+    await client.save();
+
+    otpStore.delete(email); // OTP consumed
+    res.status(200).json({ message: "Password reset successfully" });
+  } catch (error: any) {
+    res.status(500).json({ message: "Password reset failed", error: error.message });
   }
 };

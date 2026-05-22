@@ -72,7 +72,7 @@ export const createOrUpdateSettlement = async (req: Request, res: Response): Pro
 export const getSettlementByBookingId = async (req: Request, res: Response): Promise<void> => {
   try {
     const { bookingId } = req.params;
-    const settlement = await Settlement.findOne({ bookingId }).populate("assignmentId");
+    const settlement = await Settlement.findOne({ bookingId });
     if (!settlement) {
       res.status(404).json({ message: "Settlement not found" });
       return;
