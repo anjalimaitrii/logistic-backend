@@ -183,8 +183,59 @@ export const updateBookingStatus = async (req: Request, res: Response): Promise<
       return;
     }
 
+    // When driver marks returning → update their driverStatus so they appear available for queueing
+    if (tripStatus === "returning") {
+      try {
+        const Assignment = (await import("../models/Assignment.js")).default;
+        const Driver = (await import("../models/Driver.js")).default;
+
+        const assignment = await Assignment.findOne({ bookingId: id });
+        if (assignment?.driverId) {
+          await Driver.findByIdAndUpdate(assignment.driverId, {
+            driverStatus: "returning"
+          });
+        }
+      } catch (err) {
+        console.error("Driver returning status update failed (non-critical):", err);
+      }
+    }
+
+    // When a trip is fully completed, mark assignment complete and promote next queued trip
+    if (tripStatus === "completed") {
+      try {
+        const Assignment = (await import("../models/Assignment.js")).default;
+        const Driver = (await import("../models/Driver.js")).default;
+
+        const assignment = await Assignment.findOne({ bookingId: id });
+        if (assignment?.driverId) {
+          const driverId = assignment.driverId.toString();
+
+          await Assignment.findByIdAndUpdate(assignment._id, { queueStatus: "completed" });
+
+          const nextAssignment = await Assignment.findOne({
+            driverId,
+            queueStatus: "queued"
+          }).sort({ sequence: 1 });
+
+          if (nextAssignment) {
+            await Assignment.findByIdAndUpdate(nextAssignment._id, { queueStatus: "active" });
+            await Driver.findByIdAndUpdate(driverId, {
+              $pull: { tripQueue: nextAssignment.bookingId }
+            });
+          } else {
+            await Driver.findByIdAndUpdate(driverId, {
+              driverStatus: "returning",
+              needsTruckInspection: true
+            });
+          }
+        }
+      } catch (promoteErr) {
+        console.error("Auto-promote failed (non-critical):", promoteErr);
+      }
+    }
+
     res.status(200).json({
-      message: `Status updated to ${status}`,
+      message: `Status updated to ${status || tripStatus}`,
       booking: updatedBooking,
     });
   } catch (error: any) {

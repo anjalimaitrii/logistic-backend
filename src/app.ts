@@ -8,6 +8,7 @@ import driverRoutes from "./routes/driverRoutes.js";
 import assignmentRoutes from "./routes/assignmentRoutes.js";
 import settlementRoutes from "./routes/settlementRoutes.js";
 import collectionRoutes from "./routes/collectionRoutes.js";
+import truckInspectionRoutes from "./routes/truckInspectionRoutes.js";
 
 const app = express();
 
@@ -22,5 +23,6 @@ app.use("/api/drivers", driverRoutes);
 app.use("/api/assignments", assignmentRoutes);
 app.use("/api/settlements", settlementRoutes);
 app.use("/api/collections", collectionRoutes);
+app.use("/api/truck-inspections", truckInspectionRoutes);
 
 export default app;
