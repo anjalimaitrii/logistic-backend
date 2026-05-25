@@ -9,6 +9,8 @@ import assignmentRoutes from "./routes/assignmentRoutes.js";
 import settlementRoutes from "./routes/settlementRoutes.js";
 import collectionRoutes from "./routes/collectionRoutes.js";
 import truckInspectionRoutes from "./routes/truckInspectionRoutes.js";
+import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
+import travelSummaryRoutes from "./routes/travelSummaryRoutes.js";
 
 const app = express();
 
@@ -24,5 +26,7 @@ app.use("/api/assignments", assignmentRoutes);
 app.use("/api/settlements", settlementRoutes);
 app.use("/api/collections", collectionRoutes);
 app.use("/api/truck-inspections", truckInspectionRoutes);
+app.use("/api/livetrack", liveTrackingRoutes);
+app.use("/api/travel-summary", travelSummaryRoutes);
 
 export default app;
