@@ -11,6 +11,7 @@ import collectionRoutes from "./routes/collectionRoutes.js";
 import truckInspectionRoutes from "./routes/truckInspectionRoutes.js";
 import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import travelSummaryRoutes from "./routes/travelSummaryRoutes.js";
+import tollRoutes from "./routes/tollRoutes.js";
 
 const app = express();
 
@@ -28,5 +29,6 @@ app.use("/api/collections", collectionRoutes);
 app.use("/api/truck-inspections", truckInspectionRoutes);
 app.use("/api/livetrack", liveTrackingRoutes);
 app.use("/api/travel-summary", travelSummaryRoutes);
+app.use("/api/toll", tollRoutes);
 
 export default app;

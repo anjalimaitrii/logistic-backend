@@ -25,6 +25,7 @@ export interface ISettlement extends Document {
     cashAllocation: number;
     fuelTotal: number;
   };
+  tollAmount?: number;
   status: string;
 }
 
@@ -58,6 +59,7 @@ const SettlementSchema: Schema = new Schema(
       cashAllocation: { type: Number, default: 0 },
       fuelTotal: { type: Number, default: 0 }
     },
+    tollAmount: { type: Number, default: 0 },
     status: { type: String, default: "Approved" }
   },
   { timestamps: true }

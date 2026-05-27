@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import Booking from "../models/Booking.js";
+import { getIo } from "../socket.js";
 
 export const createBooking = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -13,6 +14,8 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       status,
       metadata,
       clientId,
+      isSecret,
+      withTax,
     } = req.body;
 
     // Generate sequential Trip ID
@@ -39,6 +42,8 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
         },
       ],
       metadata,
+      isSecret: isSecret ?? false,
+      withTax: withTax ?? true,
     };
 
     if (Array.isArray(pickupLocations) && pickupLocations.length > 0) {
@@ -86,6 +91,19 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
     const newBooking = new Booking(bookingData);
 
     const savedBooking = await newBooking.save();
+
+    // Notify all connected admin clients
+    try {
+      getIo().emit("new_job", {
+        tripId: savedBooking.tripId,
+        pickup: savedBooking.pickupLocations?.[0]?.address?.city || "N/A",
+        dropoff: savedBooking.dropoffLocations?.[0]?.address?.city || "N/A",
+        goods: savedBooking.cargoDetails?.goodsType || "N/A",
+        createdAt: savedBooking.createdAt,
+      });
+    } catch {
+      // Socket not critical — ignore if not initialized
+    }
 
     res.status(201).json({
       message: "Booking posted successfully",

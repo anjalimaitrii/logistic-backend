@@ -1,14 +1,16 @@
 import { Request, Response } from "express";
 import Settlement from "../models/Settlement.js";
 import Booking from "../models/Booking.js";
+import { deductToll } from "./tollController.js";
 
 export const createOrUpdateSettlement = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { bookingId, fuelDetails, expenses, financials } = req.body;
+    const { bookingId, fuelDetails, expenses, financials, tollAmount } = req.body;
 
     const updateData: any = {};
     if (expenses) updateData.expenses = expenses;
     if (financials) updateData.financials = financials;
+    if (tollAmount !== undefined) updateData.tollAmount = Number(tollAmount);
 
     if (fuelDetails) {
       const legs = Array.isArray(fuelDetails.legs) ? fuelDetails.legs : [];
@@ -24,11 +26,23 @@ export const createOrUpdateSettlement = async (req: Request, res: Response): Pro
 
     updateData.status = "Approved";
 
+    // Find existing settlement to calculate toll deduction delta
+    const existing = await Settlement.findOne({ bookingId });
+    const prevToll = existing?.tollAmount || 0;
+    const newToll = tollAmount !== undefined ? Number(tollAmount) : prevToll;
+    const tollDelta = newToll - prevToll;
+
     const settlement = await Settlement.findOneAndUpdate(
        { bookingId },
        { $set: updateData },
        { new: true, upsert: true }
      );
+
+    // Deduct toll from toll account if toll amount increased
+    if (tollDelta > 0) {
+      const booking = await Booking.findById(bookingId).select("tripId");
+      await deductToll(tollDelta, bookingId, booking?.tripId || bookingId.toString());
+    }
 
     // Update Journey Timeline in Booking
     if (financials && financials.cashAllocation) {
