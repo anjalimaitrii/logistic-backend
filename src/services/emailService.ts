@@ -9,14 +9,18 @@ const getSES = () => new SESClient({
   },
 });
 
-const getSender = () => process.env.AWS_SES_SENDER_EMAIL || "support@maitriiinfotech.com";
+const getSender = () => process.env.AWS_SES_SENDER_EMAIL!;
+
+const toTitleCase = (name: string) =>
+  name.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
 export const sendOTPEmail = async (opts: {
   toEmail: string;
   clientName: string;
   otp: string;
 }): Promise<void> => {
-  const { toEmail, clientName, otp } = opts;
+  const { toEmail, otp } = opts;
+  const clientName = toTitleCase(opts.clientName);
 
   const html = `
 <!DOCTYPE html><html><head><meta charset="UTF-8"/></head>
@@ -32,9 +36,10 @@ export const sendOTPEmail = async (opts: {
         <p style="margin:0 0 6px;color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Hello, ${clientName}</p>
         <h2 style="margin:0 0 20px;color:#0f172a;font-size:22px;font-weight:700;">Your OTP Code</h2>
         <p style="margin:0 0 28px;color:#475569;font-size:14px;line-height:1.7;">Use the code below to reset your password. It expires in <strong>10 minutes</strong>.</p>
-        <div style="text-align:center;margin-bottom:28px;">
+        <div style="text-align:center;margin-bottom:8px;">
           <span style="display:inline-block;background:#f1f5f9;border:2px dashed #cbd5e1;border-radius:14px;padding:18px 40px;font-family:monospace;font-size:38px;font-weight:800;color:#0f172a;letter-spacing:10px;">${otp}</span>
         </div>
+        <p style="text-align:center;margin:0 0 24px;color:#94a3b8;font-size:11px;">📋 Press &amp; hold on the code above to copy</p>
         <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;">
           <tr><td style="padding:12px 16px;">
             <p style="margin:0;color:#9a3412;font-size:13px;">Do not share this OTP with anyone. If you did not request this, ignore this email.</p>
@@ -42,7 +47,7 @@ export const sendOTPEmail = async (opts: {
         </table>
       </td></tr>
       <tr><td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center;">
-        <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} Maitrii Infotech · support@maitriiinfotech.com</p>
+        <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} Maitrii Infotech · <a href="https://www.maitriiinfotech.com/" style="color:#94a3b8;text-decoration:none;">www.maitriiinfotech.com</a></p>
       </td></tr>
     </table>
   </td></tr>
@@ -69,7 +74,8 @@ export const sendClientWelcomeEmail = async (opts: {
   clientName: string;
   password: string;
 }): Promise<void> => {
-  const { toEmail, clientName, password } = opts;
+  const { toEmail, password } = opts;
+  const clientName = toTitleCase(opts.clientName);
 
   const htmlBody = `
 <!DOCTYPE html>
@@ -100,21 +106,27 @@ export const sendClientWelcomeEmail = async (opts: {
               </p>
 
               <!-- Credentials Card -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:28px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
                 <tr>
-                  <td style="padding:24px 28px;">
-                    <p style="margin:0 0 4px;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;">Your Login Credentials</p>
-                    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;">
+                  <td>
+                    <p style="margin:0 0 12px;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;">Your Login Credentials</p>
+
+                    <!-- Email Box -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:10px;margin-bottom:10px;">
                       <tr>
-                        <td style="padding:10px 0;border-bottom:1px solid #e2e8f0;">
-                          <span style="color:#64748b;font-size:13px;font-weight:600;">Email</span>
-                          <span style="float:right;color:#0f172a;font-size:13px;font-weight:700;">${toEmail}</span>
+                        <td style="padding:14px 18px;">
+                          <p style="margin:0 0 4px;color:#0369a1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">📧 Email (tap &amp; hold to copy)</p>
+                          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:700;font-family:monospace;word-break:break-all;letter-spacing:0.3px;">${toEmail} &nbsp;📋</p>
                         </td>
                       </tr>
+                    </table>
+
+                    <!-- Password Box -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;">
                       <tr>
-                        <td style="padding:10px 0;">
-                          <span style="color:#64748b;font-size:13px;font-weight:600;">Password</span>
-                          <span style="float:right;color:#0f172a;font-size:13px;font-weight:700;letter-spacing:1px;font-family:monospace;">${password}</span>
+                        <td style="padding:14px 18px;">
+                          <p style="margin:0 0 4px;color:#15803d;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">🔑 Password (tap &amp; hold to copy)</p>
+                          <p style="margin:0;color:#0f172a;font-size:15px;font-weight:700;font-family:monospace;letter-spacing:2px;">${password} &nbsp;📋</p>
                         </td>
                       </tr>
                     </table>
@@ -133,6 +145,15 @@ export const sendClientWelcomeEmail = async (opts: {
                 </tr>
               </table>
 
+              <!-- Login Button -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="https://logistic-three-smoky.vercel.app/" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:8px;letter-spacing:0.5px;">Login to Dashboard</a>
+                  </td>
+                </tr>
+              </table>
+
               <p style="margin:0;color:#475569;font-size:14px;line-height:1.7;">
                 If you have any questions or need help getting started, reply to this email and our support team will assist you.
               </p>
@@ -142,7 +163,7 @@ export const sendClientWelcomeEmail = async (opts: {
           <tr>
             <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:24px 40px;text-align:center;">
               <p style="margin:0;color:#94a3b8;font-size:12px;">
-                © ${new Date().getFullYear()} Maitrii Infotech · <a href="mailto:support@maitriiinfotech.com" style="color:#64748b;text-decoration:none;">support@maitriiinfotech.com</a>
+                © ${new Date().getFullYear()} Maitrii Infotech · <a href="https://www.maitriiinfotech.com/" style="color:#64748b;text-decoration:none;">www.maitriiinfotech.com</a>
               </p>
             </td>
           </tr>
@@ -164,7 +185,9 @@ Password: ${password}
 
 Please change your password after your first login.
 
-For support, contact us at support@maitriiinfotech.com
+Login here: https://logistic-three-smoky.vercel.app/
+
+Visit us at https://www.maitriiinfotech.com/
 © ${new Date().getFullYear()} Maitrii Infotech
   `.trim();
 
