@@ -1,8 +1,8 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import Company from "../models/Company.js";
 import Client from "../models/Client.js";
 
-export const createCompany = async (req: Request, res: Response): Promise<void> => {
+export const createCompany = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { companyName, cinNumber, address, contact, accounting, status } = req.body;
 
@@ -29,26 +29,20 @@ export const createCompany = async (req: Request, res: Response): Promise<void> 
       company: savedCompany,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error creating company",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const getCompanies = async (req: Request, res: Response): Promise<void> => {
+export const getCompanies = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const companies = await Company.find().populate("clients").sort({ createdAt: -1 });
     res.status(200).json(companies);
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error fetching companies",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const addClientsToCompany = async (req: Request, res: Response): Promise<void> => {
+export const addClientsToCompany = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const { clientIds } = req.body;
@@ -80,9 +74,6 @@ export const addClientsToCompany = async (req: Request, res: Response): Promise<
       company,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error adding clients to company",
-      error: error.message,
-    });
+    next(error);
   }
 };

@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 
 const TRAKZEE_BASE = "http://13.127.228.11/webservice";
 const CREDENTIALS = {
@@ -101,7 +101,7 @@ async function fetchVehicleData(token: string): Promise<any[]> {
   return data?.root?.VehicleData ?? data?.VehicleData ?? [];
 }
 
-export const getLiveVehicles = async (req: Request, res: Response): Promise<void> => {
+export const getLiveVehicles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const token = await getToken();
 
@@ -135,6 +135,6 @@ export const getLiveVehicles = async (req: Request, res: Response): Promise<void
     res.status(200).json({ success: true, vehicles, count: vehicles.length });
   } catch (error: any) {
     console.error("[LiveTrack]", error.message);
-    res.status(500).json({ success: false, error: error.message, vehicles: [] });
+    next(error);
   }
 };

@@ -1,9 +1,9 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import Settlement from "../models/Settlement.js";
 import Booking from "../models/Booking.js";
 import { deductToll } from "./tollController.js";
 
-export const createOrUpdateSettlement = async (req: Request, res: Response): Promise<void> => {
+export const createOrUpdateSettlement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { bookingId, fuelDetails, expenses, financials, tollAmount } = req.body;
 
@@ -79,11 +79,11 @@ export const createOrUpdateSettlement = async (req: Request, res: Response): Pro
       settlement
     });
   } catch (error: any) {
-    res.status(500).json({ message: "Error processing settlement", error: error.message });
+    next(error);
   }
 };
 
-export const getSettlementByBookingId = async (req: Request, res: Response): Promise<void> => {
+export const getSettlementByBookingId = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { bookingId } = req.params;
     const settlement = await Settlement.findOne({ bookingId });
@@ -93,15 +93,15 @@ export const getSettlementByBookingId = async (req: Request, res: Response): Pro
     }
     res.status(200).json(settlement);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching settlement", error: error.message });
+    next(error);
   }
 };
 
-export const getAllSettlements = async (req: Request, res: Response): Promise<void> => {
+export const getAllSettlements = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const settlements = await Settlement.find().populate("bookingId");
     res.status(200).json(settlements);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching settlements", error: error.message });
+    next(error);
   }
 };

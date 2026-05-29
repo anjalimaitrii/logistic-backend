@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import Client from "../models/Client.js";
 import Company from "../models/Company.js";
 import bcrypt from "bcryptjs";
@@ -10,7 +10,7 @@ const otpStore = new Map<string, { otp: string; expiresAt: number }>();
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-export const createClient = async (req: Request, res: Response): Promise<void> => {
+export const createClient = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { name, email, contact, designation, password, status, company } = req.body;
 
@@ -60,14 +60,11 @@ export const createClient = async (req: Request, res: Response): Promise<void> =
       client: clientResponse,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error creating client",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const loginClient = async (req: Request, res: Response): Promise<void> => {
+export const loginClient = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { identifier, password } = req.body;
 
@@ -110,11 +107,11 @@ export const loginClient = async (req: Request, res: Response): Promise<void> =>
       client: clientData,
     });
   } catch (error: any) {
-    res.status(500).json({ message: "Login failed", error: error.message });
+    next(error);
   }
 };
 
-export const getClients = async (req: Request, res: Response): Promise<void> => {
+export const getClients = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const companyId = req.query.companyId as string;
     const filter = companyId ? { company: companyId } : {};
@@ -126,14 +123,11 @@ export const getClients = async (req: Request, res: Response): Promise<void> => 
       
     res.status(200).json(clients);
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error fetching clients",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const updateClientPassword = async (req: Request, res: Response): Promise<void> => {
+export const updateClientPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
@@ -156,11 +150,11 @@ export const updateClientPassword = async (req: Request, res: Response): Promise
 
     res.status(200).json({ message: "Password updated successfully" });
   } catch (error: any) {
-    res.status(500).json({ message: "Password update failed", error: error.message });
+    next(error);
   }
 };
 
-export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { email } = req.body;
     if (!email) { res.status(400).json({ message: "Email is required" }); return; }
@@ -177,11 +171,11 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
     res.status(200).json({ message: "OTP sent to your email" });
   } catch (error: any) {
     console.error("forgotPassword error:", error.message);
-    res.status(500).json({ message: "Failed to send OTP", error: error.message });
+    next(error);
   }
 };
 
-export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
+export const verifyOTP = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { email, otp } = req.body;
     const record = otpStore.get(email);
@@ -192,11 +186,11 @@ export const verifyOTP = async (req: Request, res: Response): Promise<void> => {
 
     res.status(200).json({ message: "OTP verified" });
   } catch (error: any) {
-    res.status(500).json({ message: "OTP verification failed", error: error.message });
+    next(error);
   }
 };
 
-export const resetPassword = async (req: Request, res: Response): Promise<void> => {
+export const resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { email, otp, newPassword } = req.body;
     if (!newPassword || newPassword.length < 8) { res.status(400).json({ message: "Password must be at least 8 characters" }); return; }
@@ -216,6 +210,6 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
     otpStore.delete(email); // OTP consumed
     res.status(200).json({ message: "Password reset successfully" });
   } catch (error: any) {
-    res.status(500).json({ message: "Password reset failed", error: error.message });
+    next(error);
   }
 };

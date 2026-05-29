@@ -1,8 +1,8 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import Booking from "../models/Booking.js";
 import { getIo } from "../socket.js";
 
-export const createBooking = async (req: Request, res: Response): Promise<void> => {
+export const createBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const {
       cargoDetails,
@@ -110,14 +110,11 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       booking: savedBooking,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error posting booking",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const getBookings = async (req: Request, res: Response): Promise<void> => {
+export const getBookings = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const clientId = req.query.clientId as string;
     const filter = clientId ? { clientId } : {};
@@ -135,14 +132,11 @@ export const getBookings = async (req: Request, res: Response): Promise<void> =>
 
     res.status(200).json(bookings);
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error fetching bookings",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const getBookingById = async (req: Request, res: Response): Promise<void> => {
+export const getBookingById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const booking = await Booking.findById(id).populate("clientId", "name email contact");
@@ -154,14 +148,11 @@ export const getBookingById = async (req: Request, res: Response): Promise<void>
 
     res.status(200).json(booking);
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error fetching booking details",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const updateBookingStatus = async (req: Request, res: Response): Promise<void> => {
+export const updateBookingStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment } = req.body;
@@ -257,14 +248,11 @@ export const updateBookingStatus = async (req: Request, res: Response): Promise<
       booking: updatedBooking,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error updating status",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const updateBooking = async (req: Request, res: Response): Promise<void> => {
+export const updateBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -285,14 +273,11 @@ export const updateBooking = async (req: Request, res: Response): Promise<void> 
       booking: updatedBooking,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error updating booking",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const changeDropoffAddress = async (req: Request, res: Response): Promise<void> => {
+export const changeDropoffAddress = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const { newPickup, newDropoff, reason, financials } = req.body;
@@ -413,9 +398,6 @@ export const changeDropoffAddress = async (req: Request, res: Response): Promise
       booking: updatedBooking
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error changing job addresses",
-      error: error.message,
-    });
+    next(error);
   }
 };

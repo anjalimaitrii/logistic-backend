@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import TollAccount from "../models/TollAccount.js";
 
 const getOrCreateAccount = async () => {
@@ -9,16 +9,16 @@ const getOrCreateAccount = async () => {
   return account;
 };
 
-export const getTollAccount = async (req: Request, res: Response): Promise<void> => {
+export const getTollAccount = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const account = await getOrCreateAccount();
     res.status(200).json(account);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching toll account", error: error.message });
+    next(error);
   }
 };
 
-export const addRecharge = async (req: Request, res: Response): Promise<void> => {
+export const addRecharge = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { amount, description } = req.body;
     if (!amount || Number(amount) <= 0) {
@@ -38,7 +38,7 @@ export const addRecharge = async (req: Request, res: Response): Promise<void> =>
 
     res.status(200).json({ message: "Recharge added successfully", account });
   } catch (error: any) {
-    res.status(500).json({ message: "Error adding recharge", error: error.message });
+    next(error);
   }
 };
 

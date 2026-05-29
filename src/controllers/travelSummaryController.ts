@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 
 const REPORT_BASE = "http://13.245.46.90/ReportServices";
 const CREDENTIALS = {
@@ -56,7 +56,7 @@ async function fetchReport(token: string, body: object): Promise<any> {
   return res.json();
 }
 
-export const getTravelSummary = async (req: Request, res: Response): Promise<void> => {
+export const getTravelSummary = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { start_date_time, end_date_time, imei_nos } = req.body;
 
   if (!start_date_time || !end_date_time || !imei_nos) {
@@ -82,6 +82,6 @@ export const getTravelSummary = async (req: Request, res: Response): Promise<voi
     res.status(200).json({ success: true, data: records, count: records.length });
   } catch (error: any) {
     console.error("[TravelSummary]", error.message);
-    res.status(500).json({ success: false, error: error.message });
+    next(error);
   }
 };

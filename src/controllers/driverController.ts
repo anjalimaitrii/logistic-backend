@@ -1,9 +1,9 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import Driver from "../models/Driver.js";
 import Assignment from "../models/Assignment.js";
 import Booking from "../models/Booking.js";
 
-export const createDriver = async (req: Request, res: Response): Promise<void> => {
+export const createDriver = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const driver = new Driver(req.body);
     await driver.save();
@@ -13,7 +13,7 @@ export const createDriver = async (req: Request, res: Response): Promise<void> =
   }
 };
 
-export const getDrivers = async (req: Request, res: Response): Promise<void> => {
+export const getDrivers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const drivers = await Driver.find().populate("assignedTruck");
 
@@ -45,11 +45,11 @@ export const getDrivers = async (req: Request, res: Response): Promise<void> => 
 
     res.json(drivers);
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    next(error);
   }
 };
 
-export const getDriverById = async (req: Request, res: Response): Promise<void> => {
+export const getDriverById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const driver = await Driver.findById(req.params.id).populate("assignedTruck");
     if (!driver) {
@@ -58,11 +58,11 @@ export const getDriverById = async (req: Request, res: Response): Promise<void> 
     }
     res.json(driver);
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    next(error);
   }
 };
 
-export const updateDriver = async (req: Request, res: Response): Promise<void> => {
+export const updateDriver = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const driver = await Driver.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!driver) {
@@ -75,7 +75,7 @@ export const updateDriver = async (req: Request, res: Response): Promise<void> =
   }
 };
 
-export const deleteDriver = async (req: Request, res: Response): Promise<void> => {
+export const deleteDriver = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const driver = await Driver.findByIdAndDelete(req.params.id);
     if (!driver) {
@@ -84,6 +84,6 @@ export const deleteDriver = async (req: Request, res: Response): Promise<void> =
     }
     res.json({ message: "Driver deleted successfully" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    next(error);
   }
 };

@@ -1,7 +1,7 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import Truck from "../models/Truck.js";
 
-export const createTruck = async (req: Request, res: Response): Promise<void> => {
+export const createTruck = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const truckData = req.body;
     const newTruck = new Truck(truckData);
@@ -12,26 +12,20 @@ export const createTruck = async (req: Request, res: Response): Promise<void> =>
       truck: savedTruck,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error adding truck",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const getTrucks = async (req: Request, res: Response): Promise<void> => {
+export const getTrucks = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const trucks = await Truck.find().sort({ createdAt: -1 });
     res.status(200).json(trucks);
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error fetching trucks",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const getTruckById = async (req: Request, res: Response): Promise<void> => {
+export const getTruckById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const truck = await Truck.findById(id);
@@ -43,14 +37,11 @@ export const getTruckById = async (req: Request, res: Response): Promise<void> =
 
     res.status(200).json(truck);
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error fetching truck details",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const updateTruck = async (req: Request, res: Response): Promise<void> => {
+export const updateTruck = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -69,14 +60,11 @@ export const updateTruck = async (req: Request, res: Response): Promise<void> =>
       truck: updatedTruck,
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error updating truck",
-      error: error.message,
-    });
+    next(error);
   }
 };
 
-export const deleteTruck = async (req: Request, res: Response): Promise<void> => {
+export const deleteTruck = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
     const deletedTruck = await Truck.findByIdAndDelete(id);
@@ -90,9 +78,6 @@ export const deleteTruck = async (req: Request, res: Response): Promise<void> =>
       message: "Truck deleted successfully",
     });
   } catch (error: any) {
-    res.status(500).json({
-      message: "Error deleting truck",
-      error: error.message,
-    });
+    next(error);
   }
 };

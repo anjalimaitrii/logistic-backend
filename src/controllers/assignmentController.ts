@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import Assignment from "../models/Assignment.js";
 import Booking from "../models/Booking.js";
 import Driver from "../models/Driver.js";
@@ -34,7 +34,7 @@ const promoteOrReturnDriver = async (driverId: string) => {
   }
 };
 
-export const createAssignment = async (req: Request, res: Response): Promise<void> => {
+export const createAssignment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { bookingId, truckId, driverId, driverName, truckNumber, truckHealth, collectionArea } = req.body;
 
@@ -105,20 +105,20 @@ export const createAssignment = async (req: Request, res: Response): Promise<voi
       queued: queueStatus === "queued"
     });
   } catch (error: any) {
-    res.status(500).json({ message: "Error assigning job", error: error.message });
+    next(error);
   }
 };
 
-export const getAssignments = async (req: Request, res: Response): Promise<void> => {
+export const getAssignments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const assignments = await Assignment.find().populate("bookingId");
     res.status(200).json(assignments);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching assignments", error: error.message });
+    next(error);
   }
 };
 
-export const getAssignmentByBookingId = async (req: Request, res: Response): Promise<void> => {
+export const getAssignmentByBookingId = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { bookingId } = req.params;
     const assignment = await Assignment.findOne({ bookingId });
@@ -128,11 +128,11 @@ export const getAssignmentByBookingId = async (req: Request, res: Response): Pro
     }
     res.status(200).json(assignment);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching assignment", error: error.message });
+    next(error);
   }
 };
 
-export const updateAssignment = async (req: Request, res: Response): Promise<void> => {
+export const updateAssignment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { bookingId } = req.params;
     const { driverName, driverId, truckId, truckNumber, truckHealth, collectionArea, queueStatus } = req.body;
@@ -159,32 +159,32 @@ export const updateAssignment = async (req: Request, res: Response): Promise<voi
 
     res.status(200).json({ message: "Assignment updated successfully", assignment });
   } catch (error: any) {
-    res.status(500).json({ message: "Error updating assignment", error: error.message });
+    next(error);
   }
 };
 
-export const getAssignmentsByTruck = async (req: Request, res: Response): Promise<void> => {
+export const getAssignmentsByTruck = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { truckId } = req.params;
     const assignments = await Assignment.find({ truckId }).populate("bookingId");
     res.status(200).json(assignments);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching assignments for truck", error: error.message });
+    next(error);
   }
 };
 
-export const getAssignmentsByDriver = async (req: Request, res: Response): Promise<void> => {
+export const getAssignmentsByDriver = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { driverId } = req.params;
     const assignments = await Assignment.find({ driverId }).populate("bookingId");
     res.status(200).json(assignments);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching assignments for driver", error: error.message });
+    next(error);
   }
 };
 
 // Promote the next queued trip for a driver (called manually or after trip completion)
-export const promoteNextTrip = async (req: Request, res: Response): Promise<void> => {
+export const promoteNextTrip = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { driverId } = req.params;
   const driverIdStr = Array.isArray(driverId) ? driverId[0] : driverId;
   try {
@@ -204,12 +204,12 @@ export const promoteNextTrip = async (req: Request, res: Response): Promise<void
       driverStatus: updatedDriver?.driverStatus
     });
   } catch (error: any) {
-    res.status(500).json({ message: "Error promoting next trip", error: error.message });
+    next(error);
   }
 };
 
 // Mark truck as inspected → save to TruckInspection history + driver becomes available
-export const markTruckInspected = async (req: Request, res: Response): Promise<void> => {
+export const markTruckInspected = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { driverId } = req.params;
   const { vehicleCondition, tyreCondition, notes } = req.body;
   try {
@@ -235,18 +235,18 @@ export const markTruckInspected = async (req: Request, res: Response): Promise<v
 
     res.status(200).json({ message: "Truck inspection complete. Driver is now available.", inspection });
   } catch (error: any) {
-    res.status(500).json({ message: "Error marking inspection complete", error: error.message });
+    next(error);
   }
 };
 
 // Get drivers that are returning or under inspection
-export const getReturningDrivers = async (req: Request, res: Response): Promise<void> => {
+export const getReturningDrivers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const drivers = await Driver.find({
       driverStatus: { $in: ["returning", "under_inspection"] }
     }).populate("assignedTruck");
     res.status(200).json(drivers);
   } catch (error: any) {
-    res.status(500).json({ message: "Error fetching returning drivers", error: error.message });
+    next(error);
   }
 };
