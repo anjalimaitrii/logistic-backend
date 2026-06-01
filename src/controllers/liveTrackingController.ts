@@ -1,9 +1,10 @@
 import { Request, Response, NextFunction } from "express";
+import { LiveTrackingCache } from "../models/liveTrackingCache.js";
 
-const TRAKZEE_BASE = "http://13.127.228.11/webservice";
+const TRAKZEE_BASE = process.env.TRAKZEE_BASE_URL || "http://13.127.228.11/webservice";
 const CREDENTIALS = {
-  username: "speedogisticzm@tntzm.gps",
-  password: "Krishna@1985",
+  username: process.env.TRAKZEE_USERNAME || "",
+  password: process.env.TRAKZEE_PASSWORD || "",
 };
 
 let cachedToken: string | null = null;
@@ -13,14 +14,26 @@ let tokenExpiry = 0;
 let officialVehicleNames: Set<string> | null = null;
 let officialListExpiry = 0;
 
+// Live vehicle data cache (10 second TTL)
+let cachedLiveData: any = null;
+let liveDataExpiry = 0;
+
 async function getToken(forceRefresh = false): Promise<string> {
-  if (!forceRefresh && cachedToken && Date.now() < tokenExpiry) return cachedToken;
+  if (!forceRefresh && cachedToken && Date.now() < tokenExpiry) {
+    console.log("[LiveTrack] Using cached token");
+    return cachedToken;
+  }
+
+  console.log("[LiveTrack] Fetching new token from:", `${TRAKZEE_BASE}?token=generateAccessToken`);
+  console.log("[LiveTrack] Username:", CREDENTIALS.username);
 
   const res = await fetch(`${TRAKZEE_BASE}?token=generateAccessToken`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(CREDENTIALS),
   });
+
+  console.log("[LiveTrack] Token response status:", res.status);
 
   if (!res.ok) throw new Error(`Token request failed: ${res.status}`);
 
@@ -34,13 +47,14 @@ async function getToken(forceRefresh = false): Promise<string> {
     null;
 
   if (!token) {
-    console.error("[LiveTrack] Unexpected token response:", JSON.stringify(data));
+    console.error("[LiveTrack] ✗ Token not found in response");
+    console.error("[LiveTrack] Response was:", JSON.stringify(data).slice(0, 200));
     throw new Error("Token not found in response");
   }
 
   cachedToken = token;
   tokenExpiry = Date.now() + 22 * 60 * 60 * 1000;
-  console.log("[LiveTrack] Token refreshed, valid for 22h");
+  console.log("[LiveTrack] ✓ Token obtained, valid for 22h");
   return token;
 }
 
@@ -79,6 +93,7 @@ async function getOfficialVehicleNames(token: string): Promise<Set<string>> {
 }
 
 async function fetchVehicleData(token: string): Promise<any[]> {
+  console.log("[LiveTrack] Fetching vehicle data with token...");
   const dataRes = await fetch(
     `${TRAKZEE_BASE}?token=getTokenBaseLiveData&ProjectId=37`,
     {
@@ -91,50 +106,119 @@ async function fetchVehicleData(token: string): Promise<any[]> {
     }
   );
 
+  console.log("[LiveTrack] Vehicle data response status:", dataRes.status);
+
   if (!dataRes.ok) {
+    console.error("[LiveTrack] ✗ Vehicle data request failed:", dataRes.status);
     cachedToken = null;
     tokenExpiry = 0;
     throw new Error(`Live data request failed: ${dataRes.status}`);
   }
 
   const data = await dataRes.json();
-  return data?.root?.VehicleData ?? data?.VehicleData ?? [];
+  console.log("[LiveTrack] Vehicle data raw response:", JSON.stringify(data).slice(0, 500));
+
+  const vehicles = data?.root?.VehicleData ?? data?.VehicleData ?? [];
+  console.log("[LiveTrack] ✓ Got", vehicles.length, "vehicles from API");
+  return vehicles;
 }
 
 export const getLiveVehicles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  console.log("[LiveTrack] GET /api/livetrack called");
   try {
-    const token = await getToken();
-
-    // Fetch official vehicle list and live data in parallel
-    const [officialNames, allVehicles] = await Promise.all([
-      getOfficialVehicleNames(token),
-      fetchVehicleData(token),
-    ]);
-
-    let vehicles = allVehicles;
-
-    // Filter to only official vehicles if list was fetched successfully
-    if (officialNames.size > 0) {
-      vehicles = allVehicles.filter((v) => officialNames.has(v.Vehicle_Name));
+    // Return in-memory cache if valid (10s TTL)
+    if (cachedLiveData && Date.now() < liveDataExpiry) {
+      console.log("[LiveTrack] ✓ Returning from memory cache");
+      res.set('Cache-Control', 'public, max-age=10');
+      res.set('X-Cache', 'HIT-MEMORY');
+      res.status(200).json(cachedLiveData);
+      return;
     }
 
-    // If empty after filter (token may have silently expired), refresh and retry
-    if (vehicles.length === 0) {
-      console.log("[LiveTrack] Got 0 vehicles — refreshing token and retrying...");
-      officialVehicleNames = null; // also reset official list
-      const freshToken = await getToken(true);
-      const [freshNames, freshAll] = await Promise.all([
-        getOfficialVehicleNames(freshToken),
-        fetchVehicleData(freshToken),
+    console.log("[LiveTrack] Memory cache miss, fetching fresh data...");
+
+    let vehicles: any[] = [];
+    let source: 'trakzee' | 'cache' = 'trakzee';
+
+    try {
+      console.log("[LiveTrack] Attempting to fetch from Trakzee API...");
+      const token = await getToken();
+
+      // Fetch official vehicle list and live data in parallel
+      console.log("[LiveTrack] Fetching official vehicle names...");
+      const [officialNames, allVehicles] = await Promise.all([
+        getOfficialVehicleNames(token),
+        fetchVehicleData(token),
       ]);
-      vehicles = freshNames.size > 0
-        ? freshAll.filter((v) => freshNames.has(v.Vehicle_Name))
-        : freshAll;
+
+      console.log("[LiveTrack] Official vehicles:", officialNames.size);
+      console.log("[LiveTrack] All vehicles from API:", allVehicles.length);
+
+      vehicles = allVehicles;
+
+      // Filter to only official vehicles if list was fetched successfully
+      if (officialNames.size > 0) {
+        vehicles = allVehicles.filter((v) => officialNames.has(v.Vehicle_Name));
+        console.log("[LiveTrack] After filtering:", vehicles.length);
+      }
+
+      // If empty, refresh token and retry once
+      if (vehicles.length === 0 && cachedToken) {
+        console.log("[LiveTrack] Got 0 vehicles — token may have expired, refreshing...");
+        officialVehicleNames = null;
+        const freshToken = await getToken(true);
+        const [freshNames, freshAll] = await Promise.all([
+          getOfficialVehicleNames(freshToken),
+          fetchVehicleData(freshToken),
+        ]);
+        vehicles = freshNames.size > 0
+          ? freshAll.filter((v) => freshNames.has(v.Vehicle_Name))
+          : freshAll;
+        console.log("[LiveTrack] After retry:", vehicles.length);
+      }
+
+      // If still empty after retry, treat as API failure — don't save, fall back to cache
+      if (vehicles.length === 0) {
+        console.warn("[LiveTrack] ⚠ API returned 0 vehicles — treating as failure, will fall back to cache");
+        throw new Error("API returned 0 vehicles (likely a data issue, not fresh data)");
+      }
+
+      // Success: save to MongoDB in background
+      console.log("[LiveTrack] ✓ Got vehicles from Trakzee. Saving to MongoDB...");
+      LiveTrackingCache.create({ vehicles, source: 'trakzee' }).then(() => {
+        console.log("[LiveTrack] ✓ Saved to MongoDB");
+      }).catch((e) =>
+        console.warn("[LiveTrack] Failed to save to cache:", e.message)
+      );
+    } catch (apiError: any) {
+      console.error("[LiveTrack] ✗ Trakzee API failed:", apiError.message);
+
+      // Fallback: get from MongoDB cache
+      console.log("[LiveTrack] Attempting to fetch from MongoDB cache...");
+      const cached = await LiveTrackingCache.findOne().sort({ createdAt: -1 });
+      if (cached && cached.vehicles.length > 0) {
+        vehicles = cached.vehicles;
+        source = 'cache';
+        console.log("[LiveTrack] ✓ Serving from MongoDB cache. Vehicles:", vehicles.length);
+      } else {
+        console.error("[LiveTrack] ✗ No MongoDB cache available");
+        // No cache either, re-throw
+        throw new Error(`API failed and no cache available: ${apiError.message}`);
+      }
     }
 
-    res.status(200).json({ success: true, vehicles, count: vehicles.length });
+    const response = { success: true, vehicles, count: vehicles.length, source };
+    cachedLiveData = response;
+    liveDataExpiry = Date.now() + 10 * 1000; // 10 second memory cache
+
+    console.log(`[LiveTrack] ✓ Response ready. Source: ${source}, Vehicles: ${vehicles.length}`);
+
+    res.set('Cache-Control', 'public, max-age=10');
+    res.set('X-Cache', source === 'trakzee' ? 'MISS-FRESH' : 'HIT-FALLBACK');
+    res.status(200).json(response);
   } catch (error: any) {
-    console.error("[LiveTrack]", error.message);
+    console.error("[LiveTrack] ✗ FATAL ERROR:", error.message);
+    console.error("[LiveTrack] Stack:", error.stack);
     next(error);
   }
 };
