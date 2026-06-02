@@ -3,7 +3,7 @@ import TruckInspection from "../models/TruckInspection.js";
 
 export const createInspection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { driverId, truckId, vehicleCondition, tyreCondition, notes } = req.body;
+    const { driverId, truckId, vehicleCondition, tyreCondition, notes, attachments } = req.body;
 
     const inspection = new TruckInspection({
       driverId,
@@ -11,7 +11,8 @@ export const createInspection = async (req: Request, res: Response, next: NextFu
       vehicleCondition,
       tyreCondition,
       notes: notes || "",
-      inspectedAt: new Date()
+      inspectedAt: new Date(),
+      attachments: attachments || [],
     });
 
     const saved = await inspection.save();

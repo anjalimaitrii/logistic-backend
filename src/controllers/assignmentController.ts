@@ -211,18 +211,23 @@ export const promoteNextTrip = async (req: Request, res: Response, next: NextFun
 // Mark truck as inspected → save to TruckInspection history + driver becomes available
 export const markTruckInspected = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { driverId } = req.params;
-  const { vehicleCondition, tyreCondition, notes } = req.body;
+  const { vehicleCondition, tyreCondition, tyreNumber, challans, deliveryOrders, damages, notes, attachments } = req.body;
   try {
     const driver = await Driver.findById(driverId);
 
     // Save inspection record to history collection
     const inspection = new TruckInspection({
       driverId,
-      truckId: driver?.assignedTruck || null,
+      truckId:          driver?.assignedTruck || null,
       vehicleCondition: vehicleCondition || "Good",
-      tyreCondition: tyreCondition || "Good",
-      notes: notes || "",
-      inspectedAt: new Date()
+      tyreCondition:    tyreCondition || "Good",
+      tyreNumber:       tyreNumber || "",
+      challans:         challans || "",
+      deliveryOrders:   deliveryOrders || [],
+      damages:          damages || [],
+      notes:            notes || "",
+      inspectedAt:      new Date(),
+      attachments:      attachments || [],
     });
     await inspection.save();
 

@@ -4,11 +4,14 @@ export interface LocationStop {
   sequence: number;
   contactPerson: string;
   contactNumber: string;
+  contactPerson2?: string;
+  contactNumber2?: string;
   address: {
-    plotNo: string;
-    street: string;
+    plotNo?: string;
+    street?: string;
     city: string;
-    pincode: string;
+    lga?: string;
+    pincode?: string;
   };
   gpsEnabled: boolean;
 }
@@ -31,16 +34,6 @@ export interface IBooking extends Document {
   specialRequest?: string;
   status: string;
   tripStatus?: string;
-  addressHistory: Array<{
-    type: string; // pickup or dropoff
-    oldAddress: {
-      contactPerson: string;
-      contactNumber: string;
-      address: { plotNo: string; street: string; city: string; pincode: string; };
-    };
-    changedAt: Date;
-    reason: string;
-  }>;
   timeline: Array<{
     title: string;
     description: string;
@@ -65,11 +58,14 @@ export interface IBooking extends Document {
 const LocationStopSchema = new Schema({
   sequence: { type: Number, required: true },
   contactPerson: { type: String },
-  contactNumber: { type: String, required: true },
+  contactNumber: { type: String },
+  contactPerson2: { type: String },
+  contactNumber2: { type: String },
   address: {
     plotNo: { type: String },
     street: { type: String },
     city: { type: String },
+    lga: { type: String },
     pincode: { type: String },
   },
   gpsEnabled: { type: Boolean, default: false },
@@ -94,23 +90,6 @@ const BookingSchema: Schema = new Schema(
     specialRequest: { type: String },
     status: { type: String, default: "pending" },
     tripStatus: { type: String },
-    addressHistory: [
-      {
-        type: { type: String }, // pickup or dropoff
-        oldAddress: {
-          contactPerson: { type: String },
-          contactNumber: { type: String },
-          address: {
-            plotNo: { type: String },
-            street: { type: String },
-            city: { type: String },
-            pincode: { type: String }
-          }
-        },
-        changedAt: { type: Date, default: Date.now },
-        reason: { type: String }
-      }
-    ],
     timeline: [
       {
         title: { type: String },

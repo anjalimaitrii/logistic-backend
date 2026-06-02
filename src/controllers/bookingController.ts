@@ -292,63 +292,26 @@ export const changeDropoffAddress = async (req: Request, res: Response, next: Ne
     const currentDropoff = booking.dropoffLocations?.[0];
 
     const setData: any = {};
-    const historyPushes: any[] = [];
-    let timelineDesc = "Address updated:";
 
     // Handle Pickup Change
     if (newPickup && currentPickup) {
-      const isPickupChanged =
-        newPickup.address?.city !== currentPickup.address?.city ||
-        newPickup.address?.street !== currentPickup.address?.street;
-
-      if (isPickupChanged) {
-        historyPushes.push({
-          type: "pickup",
-          oldAddress: {
-            contactPerson: currentPickup.contactPerson,
-            contactNumber: currentPickup.contactNumber,
-            address: { ...currentPickup.address }
-          },
-          changedAt: new Date(),
-          reason: reason || "Operational adjustment"
-        });
-        timelineDesc += ` [Pickup: ${currentPickup.address?.city} -> ${newPickup.address?.city}]`;
-      }
-
       setData["pickupLocations.0.contactPerson"] = newPickup.contactPerson || currentPickup.contactPerson;
       setData["pickupLocations.0.contactNumber"] = newPickup.contactNumber || currentPickup.contactNumber;
       setData["pickupLocations.0.address.plotNo"] = newPickup.address?.plotNo || "";
       setData["pickupLocations.0.address.street"] = newPickup.address?.street || "";
       setData["pickupLocations.0.address.city"] = newPickup.address?.city || "";
-      setData["pickupLocations.0.address.pincode"] = newPickup.address?.pincode || "";
+      setData["pickupLocations.0.address.lga"] = (newPickup.address as any)?.lga || "";
     }
 
     // Handle Dropoff Change
     if (newDropoff && currentDropoff) {
-      const isDropoffChanged =
-        newDropoff.address?.city !== currentDropoff.address?.city ||
-        newDropoff.address?.street !== currentDropoff.address?.street;
-
-      if (isDropoffChanged) {
-        historyPushes.push({
-          type: "dropoff",
-          oldAddress: {
-            contactPerson: currentDropoff.contactPerson,
-            contactNumber: currentDropoff.contactNumber,
-            address: { ...currentDropoff.address }
-          },
-          changedAt: new Date(),
-          reason: reason || "Client request"
-        });
-        timelineDesc += ` [Dropoff: ${currentDropoff.address?.city} -> ${newDropoff.address?.city}]`;
-      }
 
       setData["dropoffLocations.0.contactPerson"] = newDropoff.contactPerson || currentDropoff.contactPerson;
       setData["dropoffLocations.0.contactNumber"] = newDropoff.contactNumber || currentDropoff.contactNumber;
       setData["dropoffLocations.0.address.plotNo"] = newDropoff.address?.plotNo || "";
       setData["dropoffLocations.0.address.street"] = newDropoff.address?.street || "";
       setData["dropoffLocations.0.address.city"] = newDropoff.address?.city || "";
-      setData["dropoffLocations.0.address.pincode"] = newDropoff.address?.pincode || "";
+      setData["dropoffLocations.0.address.lga"] = (newDropoff.address as any)?.lga || "";
     }
 
     // Update finalAmount if provided
@@ -357,17 +320,6 @@ export const changeDropoffAddress = async (req: Request, res: Response, next: Ne
     }
 
     const updateQuery: any = { $set: setData };
-    if (historyPushes.length > 0) {
-      updateQuery.$push = {
-        addressHistory: { $each: historyPushes },
-        timeline: {
-          title: "Address Changed",
-          description: `${timelineDesc}. New Dist: ${financials?.newPickupKm || 0} (P) + ${financials?.newDropoffKm || 0} (D) KM. Reason: ${reason || "Update"}`,
-          time: new Date(),
-          status: "completed"
-        }
-      };
-    }
 
     const updatedBooking = await Booking.findByIdAndUpdate(
       id,

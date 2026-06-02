@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import app from './app.js';
 import connectDB from './config/db.js';
 import { initSocket } from './socket.js';
+import { startNightAlertCron } from './services/nightAlertService.js';
 
 connectDB();
 
@@ -13,4 +14,5 @@ initSocket(httpServer);
 
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startNightAlertCron();
 });

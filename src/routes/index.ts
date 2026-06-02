@@ -11,6 +11,8 @@ import truckInspectionRoutes from "./truckInspectionRoutes.js";
 import liveTrackingRoutes from "./liveTrackingRoutes.js";
 import travelSummaryRoutes from "./travelSummaryRoutes.js";
 import tollRoutes from "./tollRoutes.js";
+import goodsTypeRoutes from "./goodsTypeRoutes.js";
+import uploadRoutes from "./uploadRoutes.js";
 
 export function registerRoutes(app: Application): void {
   app.use("/api/companies", companyRoutes);
@@ -25,4 +27,6 @@ export function registerRoutes(app: Application): void {
   app.use("/api/livetrack", liveTrackingRoutes);
   app.use("/api/travel-summary", travelSummaryRoutes);
   app.use("/api/toll", tollRoutes);
+  app.use("/api/goods-types", goodsTypeRoutes);
+  app.use("/api/upload", uploadRoutes);
 }
