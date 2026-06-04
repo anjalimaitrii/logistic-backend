@@ -7,7 +7,6 @@ export interface ICompany extends Document {
     street: string;
     city: string;
     state: string;
-    pincode: string;
   };
   contact: {
     person: string;
@@ -31,7 +30,6 @@ const CompanySchema: Schema = new Schema(
       street: { type: String },
       city: { type: String },
       state: { type: String },
-      pincode: { type: String },
     },
     contact: {
       person: { type: String },

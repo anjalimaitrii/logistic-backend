@@ -81,3 +81,32 @@ export const deleteTruck = async (req: Request, res: Response, next: NextFunctio
     next(error);
   }
 };
+
+export const addTruckCollection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { name, description, quantity } = req.body;
+    const truck = await Truck.findByIdAndUpdate(
+      req.params.id,
+      { $push: { collections: { name, description: description || "", quantity: Number(quantity) || 1 } } },
+      { new: true }
+    );
+    if (!truck) { res.status(404).json({ message: "Truck not found" }); return; }
+    res.json(truck);
+  } catch (error: any) {
+    next(error);
+  }
+};
+
+export const removeTruckCollection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const truck = await Truck.findByIdAndUpdate(
+      req.params.id,
+      { $pull: { collections: { _id: req.params.colId } } },
+      { new: true }
+    );
+    if (!truck) { res.status(404).json({ message: "Truck not found" }); return; }
+    res.json(truck);
+  } catch (error: any) {
+    next(error);
+  }
+};

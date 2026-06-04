@@ -23,8 +23,20 @@ export interface ITruck {
   }[];
   fastagBalance: string;
   tireNumbers: string;
+  tireSerialNumber: string[];
   nextServiceKm: string;
   estNextServiceDate: string;
+  maintenanceFareCost?: string;
+  currentService?: string;
+  nextService?: string;
+  nextServiceDate?: string;
+  collections: {
+    _id?: any;
+    name: string;
+    description: string;
+    quantity: number;
+    createdAt?: Date;
+  }[];
 
   createdAt: Date;
   updatedAt: Date;
@@ -60,8 +72,24 @@ const TruckSchema: Schema = new Schema(
     },
     fastagBalance: { type: String, default: "0" },
     tireNumbers: { type: String },
+    tireSerialNumber: { type: [String], default: [] },
     nextServiceKm: { type: String },
     estNextServiceDate: { type: String },
+    maintenanceFareCost: { type: String },
+    currentService: { type: String },
+    nextService: { type: String },
+    nextServiceDate: { type: String },
+    collections: {
+      type: [
+        {
+          name: { type: String, required: true },
+          description: { type: String, default: "" },
+          quantity: { type: Number, default: 1 },
+          createdAt: { type: Date, default: Date.now },
+        }
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );

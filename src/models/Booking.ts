@@ -6,12 +6,13 @@ export interface LocationStop {
   contactNumber: string;
   contactPerson2?: string;
   contactNumber2?: string;
+  clientName?: string;
   address: {
     plotNo?: string;
     street?: string;
     city: string;
+    state?: string;
     lga?: string;
-    pincode?: string;
   };
   gpsEnabled: boolean;
 }
@@ -61,12 +62,13 @@ const LocationStopSchema = new Schema({
   contactNumber: { type: String },
   contactPerson2: { type: String },
   contactNumber2: { type: String },
+  clientName: { type: String },
   address: {
     plotNo: { type: String },
     street: { type: String },
     city: { type: String },
+    state: { type: String },
     lga: { type: String },
-    pincode: { type: String },
   },
   gpsEnabled: { type: Boolean, default: false },
 }, { _id: false });

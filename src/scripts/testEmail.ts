@@ -12,7 +12,7 @@ const ses = new SESClient({
 });
 
 const TO    = "anjijangid8@gmail.com";
-const FROM  = process.env.AWS_SES_SENDER_EMAIL || "support@maitriiinfotech.com";
+const FROM  = process.env.AWS_SES_SENDER_EMAIL || "anjijangid11@gmail.com";
 const CSET  = process.env.AWS_SES_CONFIGURATION_SET_NAME;
 
 async function main() {
