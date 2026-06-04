@@ -12,7 +12,7 @@ export interface LocationStop {
     street?: string;
     city: string;
     state?: string;
-    lga?: string;
+    country?: string;
   };
   gpsEnabled: boolean;
 }
@@ -68,7 +68,7 @@ const LocationStopSchema = new Schema({
     street: { type: String },
     city: { type: String },
     state: { type: String },
-    lga: { type: String },
+    country: { type: String },
   },
   gpsEnabled: { type: Boolean, default: false },
 }, { _id: false });

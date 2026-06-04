@@ -14,6 +14,7 @@ import tollRoutes from "./tollRoutes.js";
 import goodsTypeRoutes from "./goodsTypeRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
 import chatRoutes from "./chatRoutes.js";
+import routeRoutes from "./routeRoutes.js";
 
 export function registerRoutes(app: Application): void {
   app.use("/api/companies", companyRoutes);
@@ -31,4 +32,5 @@ export function registerRoutes(app: Application): void {
   app.use("/api/goods-types", goodsTypeRoutes);
   app.use("/api/upload", uploadRoutes);
   app.use("/api/chat", chatRoutes);
+  app.use("/api/routes", routeRoutes);
 }
