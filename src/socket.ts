@@ -29,14 +29,21 @@ export const initSocket = (httpServer: HttpServer) => {
       try {
         const { roomId, message, sender, senderName } = payload;
         const chat = await Chat.create({ roomId, message, sender, senderName });
-        io.to(roomId).emit("receive_message", {
+        const msgPayload = {
           _id: chat._id,
           roomId,
           message,
           sender,
           senderName,
           timestamp: chat.timestamp,
-        });
+        };
+        // Broadcast to room members (open chat panels)
+        io.to(roomId).emit("receive_message", msgPayload);
+        // Global notification event — fires for ALL connected sockets
+        // so admins get bell notification even if chat panel is closed
+        if (sender === "client") {
+          io.emit("chat_notification", msgPayload);
+        }
       } catch (err) {
         console.error("[Socket] send_message error:", err);
       }
