@@ -21,7 +21,7 @@ export interface IBooking extends Document {
   tripId: string;
   clientId?: mongoose.Types.ObjectId;
   cargoDetails: {
-    goodsType: string;
+    goodsType: string[];
     weight: number;
     loadingDate: string;
   };
@@ -78,7 +78,7 @@ const BookingSchema: Schema = new Schema(
     tripId: { type: String, unique: true, sparse: true },
     clientId: { type: Schema.Types.ObjectId, ref: "Client" },
     cargoDetails: {
-      goodsType: { type: String, required: true },
+      goodsType: { type: [String], required: true },
       weight: { type: Number },
       loadingDate: { type: String },
     },

@@ -15,6 +15,7 @@ import goodsTypeRoutes from "./goodsTypeRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
 import chatRoutes from "./chatRoutes.js";
 import routeRoutes from "./routeRoutes.js";
+import notificationRoutes from "./notificationRoutes.js";
 
 export function registerRoutes(app: Application): void {
   app.use("/api/companies", companyRoutes);
@@ -33,4 +34,5 @@ export function registerRoutes(app: Application): void {
   app.use("/api/upload", uploadRoutes);
   app.use("/api/chat", chatRoutes);
   app.use("/api/routes", routeRoutes);
+  app.use("/api/notifications", notificationRoutes);
 }
