@@ -36,6 +36,7 @@ export interface ITruck {
     description: string;
     quantity: number;
     createdAt?: Date;
+    renewedAt?: Date;
   }[];
 
   createdAt: Date;
@@ -86,6 +87,7 @@ const TruckSchema: Schema = new Schema(
           description: { type: String, default: "" },
           quantity: { type: Number, default: 1 },
           createdAt: { type: Date, default: Date.now },
+          renewedAt: { type: Date, default: null },
         }
       ],
       default: [],

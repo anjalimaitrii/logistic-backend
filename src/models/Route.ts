@@ -16,17 +16,17 @@ export interface IRoute extends Document {
 
 const RouteSchema = new Schema<IRoute>(
   {
-    pickupCity:      { type: String, required: true, trim: true },
-    pickupProvince:  { type: String, default: "", trim: true },
-    pickupCountry:   { type: String, default: "", trim: true },
-    dropoffCity:     { type: String, required: true, trim: true },
-    dropoffProvince: { type: String, default: "", trim: true },
-    dropoffCountry:  { type: String, default: "", trim: true },
-    distance:        { type: Number, required: true, min: 0 },
-    tollCount:       { type: Number, default: 0, min: 0 },
-    tollAmount:      { type: Number, default: 0, min: 0 },
-    allocationMoney: { type: Number, required: true, min: 0 },
-    councilLevy:     { type: Number, default: 0, min: 0 },
+    pickupCity:       { type: String, required: true, trim: true },
+    pickupProvince:   { type: String, default: "", trim: true },
+    pickupCountry:    { type: String, default: "", trim: true },
+    dropoffCity:      { type: String, required: true, trim: true },
+    dropoffProvince:  { type: String, default: "", trim: true },
+    dropoffCountry:   { type: String, default: "", trim: true },
+    distance:         { type: Number, required: true, min: 0 },
+    tollCount:        { type: Number, default: 0, min: 0 },
+    tollAmount:       { type: Number, default: 0, min: 0 },
+    allocationMoney:  { type: Number, required: true, min: 0 },
+    councilLevy:      { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );
