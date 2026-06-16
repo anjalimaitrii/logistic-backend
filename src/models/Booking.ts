@@ -42,6 +42,9 @@ export interface IBooking extends Document {
     status: string;
   }>;
 
+  tripStartCoords?: { lat: number; lng: number; location?: string };
+  tripStartedAt?: Date;
+  tripEndedAt?: Date;
   isSecret?: boolean;
   withTax?: boolean;
   metadata: {
@@ -101,6 +104,13 @@ const BookingSchema: Schema = new Schema(
       }
     ],
 
+    tripStartCoords: {
+      lat:      { type: Number },
+      lng:      { type: Number },
+      location: { type: String },
+    },
+    tripStartedAt: { type: Date },
+    tripEndedAt:   { type: Date },
     isSecret: { type: Boolean, default: false },
     withTax:  { type: Boolean, default: true },
     metadata: {

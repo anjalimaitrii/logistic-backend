@@ -155,11 +155,18 @@ export const getBookingById = async (req: Request, res: Response, next: NextFunc
 export const updateBookingStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment } = req.body;
+    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment, tripStartCoords } = req.body;
 
     const updateData: any = {};
     if (status) updateData.status = status;
     if (tripStatus) updateData.tripStatus = tripStatus;
+    if (tripStatus === "started" && tripStartCoords) {
+      updateData.tripStartCoords = tripStartCoords;
+      updateData.tripStartedAt = new Date();
+    }
+    if (tripStatus === "completed") {
+      updateData.tripEndedAt = new Date();
+    }
     if (finalAmount !== undefined) updateData.finalAmount = finalAmount;
     if (advancePaid !== undefined) updateData.advancePaid = advancePaid;
     if (specialRequest !== undefined) updateData.specialRequest = specialRequest;

@@ -1,11 +1,13 @@
 import { Request, Response, NextFunction } from "express";
 
-const REPORT_BASE = "http://13.245.46.90/ReportServices";
+const REPORT_BASE = "http://43.204.86.252/ReportServices";
+const USER_API_CONFIG_ID = "429";
 const CREDENTIALS = {
-  username: "carloszm@tntzm.gps",
-  password: "Carlos@2024",
+  username: process.env.TRAKZEE_USERNAME || "speedogisticzm@tntzm.gps",
+  password: process.env.TRAKZEE_PASSWORD || "Krishna@1985",
 };
 
+// auth_token expires in ~30 min — cache for 25 min
 let cachedToken: string | null = null;
 let tokenExpiry = 0;
 
@@ -22,32 +24,28 @@ async function getToken(forceRefresh = false): Promise<string> {
 
   const data = await res.json();
 
-  const token =
-    (Array.isArray(data) ? data[0]?.token : undefined) ??
-    data?.data?.[0]?.token ??
-    data?.data?.token ??
-    data?.token ??
-    null;
+  // Response shape: { result: 1, auth_token: "Bearer eyJ...", refresh_token: "..." }
+  const token = data?.auth_token ?? null;
 
   if (!token) {
     console.error("[TravelSummary] Unexpected token response:", JSON.stringify(data));
-    throw new Error("Token not found in response");
+    throw new Error("auth_token not found in response");
   }
 
   cachedToken = token;
-  tokenExpiry = Date.now() + 22 * 60 * 60 * 1000;
+  tokenExpiry = Date.now() + 25 * 60 * 1000;
   console.log("[TravelSummary] Token refreshed");
   return token;
 }
 
 async function fetchReport(token: string, body: object): Promise<any> {
   const res = await fetch(
-    `${REPORT_BASE}/customapi/travelsummaryreport?user_api_config_id=20`,
+    `${REPORT_BASE}/customapi/travelsummaryreport?user_api_config_id=${USER_API_CONFIG_ID}`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: token, // already contains "Bearer " prefix
       },
       body: JSON.stringify(body),
     }
@@ -71,14 +69,19 @@ export const getTravelSummary = async (req: Request, res: Response, next: NextFu
     let data: any;
     try {
       data = await fetchReport(token, payload);
-    } catch (err: any) {
+    } catch {
       // Token may have silently expired — refresh once and retry
       console.log("[TravelSummary] Retrying with fresh token...");
       const freshToken = await getToken(true);
       data = await fetchReport(freshToken, payload);
     }
 
-    const records: any[] = data?.data ?? data?.root?.data ?? (Array.isArray(data) ? data : []);
+    if (data?.status === "fail") {
+      res.status(429).json({ success: false, error: data.message || "Trakzee API returned fail" });
+      return;
+    }
+
+    const records: any[] = data?.data ?? [];
     res.status(200).json({ success: true, data: records, count: records.length });
   } catch (error: any) {
     console.error("[TravelSummary]", error.message);
