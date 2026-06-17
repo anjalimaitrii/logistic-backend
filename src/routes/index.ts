@@ -6,7 +6,6 @@ import truckRoutes from "./truckRoutes.js";
 import driverRoutes from "./driverRoutes.js";
 import assignmentRoutes from "./assignmentRoutes.js";
 import settlementRoutes from "./settlementRoutes.js";
-import collectionRoutes from "./collectionRoutes.js";
 import truckInspectionRoutes from "./truckInspectionRoutes.js";
 import liveTrackingRoutes from "./liveTrackingRoutes.js";
 import travelSummaryRoutes from "./travelSummaryRoutes.js";
@@ -26,7 +25,6 @@ export function registerRoutes(app: Application): void {
   app.use("/api/drivers", driverRoutes);
   app.use("/api/assignments", assignmentRoutes);
   app.use("/api/settlements", settlementRoutes);
-  app.use("/api/collections", collectionRoutes);
   app.use("/api/truck-inspections", truckInspectionRoutes);
   app.use("/api/livetrack", liveTrackingRoutes);
   app.use("/api/travel-summary", travelSummaryRoutes);

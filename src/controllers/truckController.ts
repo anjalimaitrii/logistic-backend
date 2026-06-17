@@ -99,9 +99,14 @@ export const addTruckCollection = async (req: Request, res: Response, next: Next
 
 export const renewTruckCollection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const { quantity } = req.body;
+    const updateFields: Record<string, any> = { "collections.$.renewedAt": new Date() };
+    if (quantity !== undefined && quantity !== null) {
+      updateFields["collections.$.quantity"] = Number(quantity) || 1;
+    }
     const truck = await Truck.findOneAndUpdate(
       { _id: req.params.id, "collections._id": req.params.colId },
-      { $set: { "collections.$.renewedAt": new Date() } },
+      { $set: updateFields },
       { new: true }
     );
     if (!truck) { res.status(404).json({ message: "Truck or collection not found" }); return; }
