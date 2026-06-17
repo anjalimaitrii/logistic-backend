@@ -18,6 +18,10 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             set -e
+            if [ ! -d "/root/fleet/fleet-backend" ]; then
+              mkdir -p /root/fleet
+              git clone https://github.com/anjalimaitrii/logistic-backend.git /root/fleet/fleet-backend
+            fi
             cd /root/fleet/fleet-backend
             git pull origin main
             npm ci
