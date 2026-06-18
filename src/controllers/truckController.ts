@@ -46,9 +46,25 @@ export const updateTruck = async (req: Request, res: Response, next: NextFunctio
     const { id } = req.params;
     const updateData = req.body;
 
-    const updatedTruck = await Truck.findByIdAndUpdate(id, updateData, {
-      new: true,
-    });
+    // Detect newly-added compliance documents so we can log each upload
+    const activityEntries: any[] = [];
+    if (Array.isArray(updateData.complianceDocs)) {
+      const existing = await Truck.findById(id).select("complianceDocs").lean();
+      const oldKeys = new Set(
+        (existing?.complianceDocs || []).map((d: any) => `${d.type}|${d.dueDate}|${d.file || ""}`)
+      );
+      for (const d of updateData.complianceDocs) {
+        const key = `${d.type}|${d.dueDate}|${d.file || ""}`;
+        if (!oldKeys.has(key) && d.type) {
+          activityEntries.push({ title: "Document Uploaded", description: d.type, time: new Date() });
+        }
+      }
+    }
+
+    const update: any = { ...updateData };
+    if (activityEntries.length) update.$push = { activityLog: { $each: activityEntries } };
+
+    const updatedTruck = await Truck.findByIdAndUpdate(id, update, { new: true });
 
     if (!updatedTruck) {
       res.status(404).json({ message: "Truck not found" });
@@ -85,9 +101,15 @@ export const deleteTruck = async (req: Request, res: Response, next: NextFunctio
 export const addTruckCollection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { name, description, quantity } = req.body;
+    const qty = Number(quantity) || 1;
     const truck = await Truck.findByIdAndUpdate(
       req.params.id,
-      { $push: { collections: { name, description: description || "", quantity: Number(quantity) || 1 } } },
+      {
+        $push: {
+          collections: { name, description: description || "", quantity: qty },
+          activityLog: { title: "Collection Added", description: `${name} · qty ${qty}`, time: new Date() },
+        },
+      },
       { new: true }
     );
     if (!truck) { res.status(404).json({ message: "Truck not found" }); return; }
@@ -110,6 +132,13 @@ export const renewTruckCollection = async (req: Request, res: Response, next: Ne
       { new: true }
     );
     if (!truck) { res.status(404).json({ message: "Truck or collection not found" }); return; }
+
+    // Log the renewal (name looked up from the renewed collection)
+    const renewed = (truck.collections || []).find((c: any) => String(c._id) === String(req.params.colId));
+    await Truck.findByIdAndUpdate(req.params.id, {
+      $push: { activityLog: { title: "Collection Renewed", description: renewed?.name || "Collection", time: new Date() } },
+    });
+
     res.json(truck);
   } catch (error: any) {
     next(error);

@@ -39,6 +39,12 @@ export interface ITruck {
     renewedAt?: Date;
   }[];
 
+  activityLog?: {
+    title: string;
+    description: string;
+    time: Date;
+  }[];
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -88,6 +94,17 @@ const TruckSchema: Schema = new Schema(
           quantity: { type: Number, default: 1 },
           createdAt: { type: Date, default: Date.now },
           renewedAt: { type: Date, default: null },
+        }
+      ],
+      default: [],
+    },
+    activityLog: {
+      type: [
+        {
+          title:       { type: String, required: true },
+          description: { type: String, default: "" },
+          time:        { type: Date, default: Date.now },
+          _id: false,
         }
       ],
       default: [],
