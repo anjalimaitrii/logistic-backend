@@ -21,10 +21,13 @@ export const getCompanyLedger = async (req: Request, res: Response, next: NextFu
     const payments = await Payment.find({ companyId }).sort({ paidAt: -1 });
 
     const totalBilled   = bookings.reduce((s: number, b: any) => s + (b.finalAmount || 0), 0);
-    const totalAdvance  = bookings.reduce((s: number, b: any) => s + (b.advancePaid || 0), 0);
-    const totalPayments = payments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
-    const totalPaid     = totalAdvance + totalPayments;
-    const outstanding   = totalBilled - totalPaid;
+    // advancePaid already folds in every later payment via FIFO allocation,
+    // so its sum is the TOTAL money received (original advance + later payments).
+    const advancePaidSum = bookings.reduce((s: number, b: any) => s + (b.advancePaid || 0), 0);
+    const totalPayments  = payments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+    const totalPaid      = advancePaidSum;                                  // total cash received
+    const totalAdvance   = Math.max(0, advancePaidSum - totalPayments);     // original advance (display only)
+    const outstanding    = Math.max(0, totalBilled - totalPaid);
 
     res.json({ bookings, payments, clients, totalBilled, totalPaid, totalAdvance, totalPayments, outstanding });
   } catch (error) { next(error); }
@@ -42,10 +45,13 @@ export const getClientLedger = async (req: Request, res: Response, next: NextFun
     const payments = await Payment.find({ clientId }).sort({ paidAt: -1 });
 
     const totalBilled   = bookings.reduce((s: number, b: any) => s + (b.finalAmount || 0), 0);
-    const totalAdvance  = bookings.reduce((s: number, b: any) => s + (b.advancePaid || 0), 0);
-    const totalPayments = payments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
-    const totalPaid     = totalAdvance + totalPayments;
-    const outstanding   = totalBilled - totalPaid;
+    // advancePaid already folds in every later payment via FIFO allocation,
+    // so its sum is the TOTAL money received (original advance + later payments).
+    const advancePaidSum = bookings.reduce((s: number, b: any) => s + (b.advancePaid || 0), 0);
+    const totalPayments  = payments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+    const totalPaid      = advancePaidSum;                                  // total cash received
+    const totalAdvance   = Math.max(0, advancePaidSum - totalPayments);     // original advance (display only)
+    const outstanding    = Math.max(0, totalBilled - totalPaid);
 
     res.json({ bookings, payments, totalBilled, totalPaid, totalAdvance, totalPayments, outstanding });
   } catch (error) { next(error); }
