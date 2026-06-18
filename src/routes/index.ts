@@ -16,6 +16,7 @@ import chatRoutes from "./chatRoutes.js";
 import routeRoutes from "./routeRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import mileageRoutes from "./mileageRoutes.js";
+import ledgerRoutes from "./ledgerRoutes.js";
 
 export function registerRoutes(app: Application): void {
   app.use("/api/companies", companyRoutes);
@@ -35,4 +36,5 @@ export function registerRoutes(app: Application): void {
   app.use("/api/routes", routeRoutes);
   app.use("/api/notifications", notificationRoutes);
   app.use("/api/mileage", mileageRoutes);
+  app.use("/api/ledger", ledgerRoutes);
 }

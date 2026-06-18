@@ -65,6 +65,38 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
       await Driver.findByIdAndUpdate(driverId, {
         $push: { tripQueue: bookingId }
       });
+
+      // If driver is returning, find their returning trip and log new job on its timeline
+      if (driver.driverStatus === "returning") {
+        try {
+          // Find all assignments for this driver and get the one whose booking is in "returning" state
+          const driverAssignments = await Assignment.find({ driverId }).select("bookingId").lean();
+          const allBookingIds = driverAssignments.map((a: any) => a.bookingId);
+
+          const returningBooking = await Booking.findOne({
+            _id: { $in: allBookingIds },
+            tripStatus: "returning"
+          }).select("_id tripId");
+
+          if (returningBooking) {
+            const newBookingDoc = await Booking.findById(bookingId).select("tripId");
+            const newTripLabel = newBookingDoc?.tripId || `#${String(bookingId).slice(-6).toUpperCase()}`;
+
+            await Booking.findByIdAndUpdate(returningBooking._id, {
+              $push: {
+                timeline: {
+                  title: "New Job Assigned",
+                  description: `${newTripLabel} assigned to driver while returning`,
+                  time: new Date(),
+                  status: "completed"
+                }
+              }
+            });
+          }
+        } catch (err) {
+          console.error("Failed to log new job on returning trip timeline:", err);
+        }
+      }
     } else {
       // available (or legacy driver without driverStatus) — start immediately
       await Driver.findByIdAndUpdate(driverId, { driverStatus: "on_trip" });
