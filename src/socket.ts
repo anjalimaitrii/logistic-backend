@@ -1,6 +1,7 @@
 import { Server, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
 import Chat from "./models/Chat.js";
+import Notification from "./models/Notification.js";
 
 let io: Server;
 
@@ -28,6 +29,8 @@ export const initSocket = (httpServer: HttpServer) => {
     }) => {
       try {
         const { roomId, message, sender, senderName } = payload;
+        // roomId format: clientId__tripId — split to identify recipient + trip
+        const [clientId, tripId] = roomId.split("__");
         const chat = await Chat.create({ roomId, message, sender, senderName });
         const msgPayload = {
           _id: chat._id,
@@ -39,10 +42,41 @@ export const initSocket = (httpServer: HttpServer) => {
         };
         // Broadcast to room members (open chat panels)
         io.to(roomId).emit("receive_message", msgPayload);
-        // Global notification event — fires for ALL connected sockets
-        // so admins get bell notification even if chat panel is closed
+        // Save notification for client when admin replies, then broadcast
+        if (sender === "admin") {
+          let clientNotifId: string | undefined;
+          try {
+            const notif = await Notification.create({
+              icon: "💬",
+              title: `New Message — ${senderName}`,
+              body: message,
+              link: tripId || "", // store tripId so client can open the right trip's chat
+              unread: true,
+              recipientId: clientId,
+            });
+            clientNotifId = String(notif._id);
+          } catch (dbErr) {
+            console.error("[Socket] client notification DB save failed:", dbErr);
+          }
+          io.emit("client_notification", { roomId, clientId, tripId, message, senderName, notifId: clientNotifId });
+        }
+
+        // Broadcast to all admin tabs; save DB record once so frontend doesn't duplicate.
         if (sender === "client") {
-          io.emit("chat_notification", msgPayload);
+          let notifId: string | undefined;
+          try {
+            const notif = await Notification.create({
+              icon: "💬",
+              title: `New Message — ${senderName}`,
+              body: message,
+              link: `/admin/requests?openChat=${roomId}`,
+              unread: true,
+            });
+            notifId = String(notif._id);
+          } catch (dbErr) {
+            console.error("[Socket] chat notification DB save failed:", dbErr);
+          }
+          io.emit("chat_notification", { ...msgPayload, notifId });
         }
       } catch (err) {
         console.error("[Socket] send_message error:", err);

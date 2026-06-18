@@ -6,16 +6,18 @@ export interface INotification extends Document {
   body: string;
   link: string;
   unread: boolean;
+  recipientId?: string;
   createdAt: Date;
 }
 
 const NotificationSchema = new Schema<INotification>(
   {
-    icon:   { type: String, default: "🔔" },
-    title:  { type: String, required: true },
-    body:   { type: String, required: true },
-    link:   { type: String, default: "" },
-    unread: { type: Boolean, default: true },
+    icon:        { type: String, default: "🔔" },
+    title:       { type: String, required: true },
+    body:        { type: String, required: true },
+    link:        { type: String, default: "" },
+    unread:      { type: Boolean, default: true },
+    recipientId: { type: String, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

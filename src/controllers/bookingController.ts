@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import Booking from "../models/Booking.js";
+import Notification from "../models/Notification.js";
 import { getIo } from "../socket.js";
 
 export const createBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -92,17 +93,30 @@ export const createBooking = async (req: Request, res: Response, next: NextFunct
 
     const savedBooking = await newBooking.save();
 
-    // Notify all connected admin clients
+    // Create notification once in DB, then broadcast via socket
     try {
+      const pickup = savedBooking.pickupLocations?.[0]?.address?.city || "N/A";
+      const dropoff = savedBooking.dropoffLocations?.[0]?.address?.city || "N/A";
+      const goods = Array.isArray(savedBooking.cargoDetails?.goodsType)
+        ? savedBooking.cargoDetails.goodsType.join(", ")
+        : savedBooking.cargoDetails?.goodsType || "N/A";
+      const notif = await Notification.create({
+        icon: "📦",
+        title: `New Job: ${savedBooking.tripId}`,
+        body: `${goods} · ${pickup} → ${dropoff}`,
+        link: "/admin/requests",
+        unread: true,
+      });
       getIo().emit("new_job", {
+        _id: String(notif._id),
         tripId: savedBooking.tripId,
-        pickup: savedBooking.pickupLocations?.[0]?.address?.city || "N/A",
-        dropoff: savedBooking.dropoffLocations?.[0]?.address?.city || "N/A",
-        goods: savedBooking.cargoDetails?.goodsType || "N/A",
+        pickup,
+        dropoff,
+        goods,
         createdAt: savedBooking.createdAt,
       });
     } catch {
-      // Socket not critical — ignore if not initialized
+      // Socket/DB not critical — ignore if not initialized
     }
 
     res.status(201).json({
