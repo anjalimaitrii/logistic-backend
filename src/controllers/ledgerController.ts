@@ -72,7 +72,7 @@ async function allocateFIFO(bookings: any[], amount: number): Promise<void> {
 // POST /api/ledger/company/:companyId/payment
 export const addCompanyPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { companyId } = req.params;
+    const companyId = String(req.params.companyId);
     const { amount, note, paidAt } = req.body;
     if (!amount || Number(amount) <= 0) { res.status(400).json({ message: "Valid amount required" }); return; }
 
@@ -95,7 +95,7 @@ export const addCompanyPayment = async (req: Request, res: Response, next: NextF
 // POST /api/ledger/client/:clientId/payment
 export const addClientPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { clientId } = req.params;
+    const clientId = String(req.params.clientId);
     const { amount, note, paidAt } = req.body;
     if (!amount || Number(amount) <= 0) { res.status(400).json({ message: "Valid amount required" }); return; }
 
