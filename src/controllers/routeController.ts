@@ -17,10 +17,13 @@ export const matchRoute = async (req: Request, res: Response): Promise<void> => 
       res.status(400).json({ error: "pickup and dropoff query params are required" });
       return;
     }
-    const route = await Route.findOne({
-      pickupCity:  { $regex: new RegExp(`^${pickup.trim()}$`, "i") },
-      dropoffCity: { $regex: new RegExp(`^${dropoff.trim()}$`, "i") },
-    });
+    const pickupRx  = { $regex: new RegExp(`^${pickup.trim()}$`, "i") };
+    const dropoffRx = { $regex: new RegExp(`^${dropoff.trim()}$`, "i") };
+    // Prefer an exact-direction match (A→B); fall back to the reverse (B→A).
+    // Distance, allocation, toll & levy are the same either direction.
+    const route =
+      (await Route.findOne({ pickupCity: pickupRx,  dropoffCity: dropoffRx })) ||
+      (await Route.findOne({ pickupCity: dropoffRx, dropoffCity: pickupRx }));
     res.json(route || null);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
