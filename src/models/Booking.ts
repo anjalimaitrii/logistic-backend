@@ -43,8 +43,11 @@ export interface IBooking extends Document {
   }>;
 
   tripStartCoords?: { lat: number; lng: number; location?: string };
+  tripEndCoords?: { lat: number; lng: number; location?: string };
   tripStartedAt?: Date;
   tripEndedAt?: Date;
+  tripStats?: any; // cached Trakzee GPS travel summary (last fetched)
+  tripStatsUpdatedAt?: Date;
   isSecret?: boolean;
   withTax?: boolean;
   metadata: {
@@ -109,8 +112,15 @@ const BookingSchema: Schema = new Schema(
       lng:      { type: Number },
       location: { type: String },
     },
+    tripEndCoords: {
+      lat:      { type: Number },
+      lng:      { type: Number },
+      location: { type: String },
+    },
     tripStartedAt: { type: Date },
     tripEndedAt:   { type: Date },
+    tripStats:          { type: Schema.Types.Mixed, default: null },
+    tripStatsUpdatedAt: { type: Date },
     isSecret: { type: Boolean, default: false },
     withTax:  { type: Boolean, default: true },
     metadata: {

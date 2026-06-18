@@ -169,7 +169,7 @@ export const getBookingById = async (req: Request, res: Response, next: NextFunc
 export const updateBookingStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment, tripStartCoords } = req.body;
+    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment, tripStartCoords, tripEndCoords } = req.body;
 
     const updateData: any = {};
     if (status) updateData.status = status;
@@ -180,6 +180,7 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
     }
     if (tripStatus === "completed") {
       updateData.tripEndedAt = new Date();
+      if (tripEndCoords) updateData.tripEndCoords = tripEndCoords;
     }
     if (finalAmount !== undefined) updateData.finalAmount = finalAmount;
     if (advancePaid !== undefined) updateData.advancePaid = advancePaid;
@@ -271,6 +272,24 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
   } catch (error: any) {
     next(error);
   }
+};
+
+// PATCH /api/bookings/:id/trip-stats — cache the latest Trakzee GPS stats in DB
+export const saveTripStats = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { tripStats } = req.body;
+    if (!tripStats) { res.status(400).json({ message: "tripStats required" }); return; }
+
+    const updated = await Booking.findByIdAndUpdate(
+      id,
+      { tripStats, tripStatsUpdatedAt: new Date() },
+      { new: true }
+    ).select("tripStats tripStatsUpdatedAt");
+
+    if (!updated) { res.status(404).json({ message: "Booking not found" }); return; }
+    res.status(200).json({ message: "Trip stats cached", tripStats: updated.tripStats, tripStatsUpdatedAt: updated.tripStatsUpdatedAt });
+  } catch (error: any) { next(error); }
 };
 
 export const updateBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
