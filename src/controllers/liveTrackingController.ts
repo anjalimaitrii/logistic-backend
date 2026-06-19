@@ -123,6 +123,39 @@ async function fetchVehicleData(token: string): Promise<any[]> {
   return vehicles;
 }
 
+// Look up a single truck's last-known live position from the freshest available
+// cache (in-memory 10s window, else newest MongoDB snapshot). Returns null if
+// the truck isn't found or has no valid GPS fix. Server-side equivalent of the
+// frontend's captureTruckCoords — used to freeze a returning trip's end point.
+export async function getVehiclePosition(
+  truckNumber: string
+): Promise<{ lat: number; lng: number; location?: string } | null> {
+  if (!truckNumber) return null;
+  try {
+    let vehicles: any[] = [];
+    if (cachedLiveData?.vehicles?.length && Date.now() < liveDataExpiry) {
+      vehicles = cachedLiveData.vehicles;
+    } else {
+      const cached = await LiveTrackingCache.findOne().sort({ createdAt: -1 });
+      vehicles = cached?.vehicles || [];
+    }
+    const norm = String(truckNumber).trim().toUpperCase();
+    const v = vehicles.find(
+      (x: any) =>
+        String(x.Vehicle_No || "").trim().toUpperCase() === norm ||
+        String(x.Vehicle_Name || "").trim().toUpperCase() === norm
+    );
+    const lat = parseFloat(v?.Latitude);
+    const lng = parseFloat(v?.Longitude);
+    if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+      return { lat, lng, location: v?.Location || undefined };
+    }
+  } catch (err: any) {
+    console.warn("[LiveTrack] getVehiclePosition failed:", err?.message);
+  }
+  return null;
+}
+
 export const getLiveVehicles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   console.log("[LiveTrack] GET /api/livetrack called");
   try {

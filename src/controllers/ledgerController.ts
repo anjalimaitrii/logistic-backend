@@ -57,21 +57,69 @@ export const getClientLedger = async (req: Request, res: Response, next: NextFun
   } catch (error) { next(error); }
 };
 
-// FIFO allocation — bookings must already be sorted oldest-first by caller
-async function allocateFIFO(bookings: any[], amount: number): Promise<void> {
+// FIFO allocation — bookings must already be sorted oldest-first by caller.
+// Returns the per-booking distribution so the payment can be reversed on delete.
+async function allocateFIFO(bookings: any[], amount: number): Promise<Array<{ bookingId: any; amount: number }>> {
   let remaining = amount;
+  const allocations: Array<{ bookingId: any; amount: number }> = [];
   const unpaid = bookings.filter((b: any) => (b.finalAmount || 0) > (b.advancePaid || 0));
 
   for (const booking of unpaid) {
     if (remaining <= 0) break;
     const due = (booking.finalAmount || 0) - (booking.advancePaid || 0);
+    const applied = Math.min(remaining, due);
     if (remaining >= due) {
-      await Booking.findByIdAndUpdate(booking._id, { advancePaid: booking.finalAmount, status: "paid" });
-      remaining -= due;
+      // Fully settled — mark paid, remembering the status we're overwriting
+      await Booking.findByIdAndUpdate(booking._id, {
+        advancePaid: booking.finalAmount,
+        status: "paid",
+        ...(booking.status !== "paid" ? { statusBeforePaid: booking.status } : {}),
+      });
     } else {
       await Booking.findByIdAndUpdate(booking._id, { advancePaid: (booking.advancePaid || 0) + remaining });
-      remaining = 0;
     }
+    allocations.push({ bookingId: booking._id, amount: applied });
+    remaining -= applied;
+  }
+  return allocations;
+}
+
+// Reverse a payment's allocation: subtract each allocated amount back off the
+// booking and, if it drops below the billed total, un-mark it as "paid".
+async function reverseAllocations(allocations: Array<{ bookingId: any; amount: number }>): Promise<void> {
+  for (const alloc of allocations) {
+    const b: any = await Booking.findById(alloc.bookingId).select("finalAmount advancePaid status statusBeforePaid");
+    if (!b) continue;
+    const newAdvance = Math.max(0, (b.advancePaid || 0) - (alloc.amount || 0));
+    const update: any = { advancePaid: newAdvance };
+    if (b.status === "paid" && newAdvance < (b.finalAmount || 0)) {
+      update.status = b.statusBeforePaid || "finalized";
+      update.statusBeforePaid = null;
+    }
+    await Booking.findByIdAndUpdate(b._id, update);
+  }
+}
+
+// Legacy fallback for payments saved before allocations were tracked: unwind the
+// amount newest-booking-first (mirror of FIFO) across the payer's bookings.
+async function reverseFIFOByAmount(bookingFilter: any, amount: number): Promise<void> {
+  let remaining = amount;
+  const bookings: any[] = await Booking.find(bookingFilter)
+    .select("_id finalAmount advancePaid status statusBeforePaid createdAt")
+    .sort({ createdAt: -1 });
+  for (const b of bookings) {
+    if (remaining <= 0) break;
+    const paid = b.advancePaid || 0;
+    if (paid <= 0) continue;
+    const take = Math.min(paid, remaining);
+    const newAdvance = paid - take;
+    const update: any = { advancePaid: newAdvance };
+    if (b.status === "paid" && newAdvance < (b.finalAmount || 0)) {
+      update.status = b.statusBeforePaid || "finalized";
+      update.statusBeforePaid = null;
+    }
+    await Booking.findByIdAndUpdate(b._id, update);
+    remaining -= take;
   }
 }
 
@@ -90,9 +138,11 @@ export const addCompanyPayment = async (req: Request, res: Response, next: NextF
     const clientIds = clients.map((c: any) => c._id);
     // sort: 1 = ascending = oldest first (FIFO)
     const bookings = await Booking.find({ clientId: { $in: clientIds } })
-      .select("_id finalAmount advancePaid createdAt")
+      .select("_id finalAmount advancePaid status createdAt")
       .sort({ createdAt: 1 });
-    await allocateFIFO(bookings, Number(amount));
+    const allocations = await allocateFIFO(bookings, Number(amount));
+    payment.allocations = allocations as any;
+    await payment.save();
 
     res.status(201).json(payment);
   } catch (error) { next(error); }
@@ -109,17 +159,44 @@ export const addClientPayment = async (req: Request, res: Response, next: NextFu
 
     // sort: 1 = ascending = oldest first (FIFO)
     const bookings = await Booking.find({ clientId })
-      .select("_id finalAmount advancePaid createdAt")
+      .select("_id finalAmount advancePaid status createdAt")
       .sort({ createdAt: 1 });
-    await allocateFIFO(bookings, Number(amount));
+    const allocations = await allocateFIFO(bookings, Number(amount));
+    payment.allocations = allocations as any;
+    await payment.save();
 
     res.status(201).json(payment);
   } catch (error) { next(error); }
 };
 
 // DELETE /api/ledger/payment/:paymentId
+// Irreversible — requires the admin password (verified server-side, not in the client).
 export const deletePayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const { password } = req.body || {};
+    if (!process.env.ADMIN_PASSWORD || password !== process.env.ADMIN_PASSWORD) {
+      res.status(403).json({ message: "Invalid admin password" });
+      return;
+    }
+
+    const payment: any = await Payment.findById(req.params.paymentId);
+    if (!payment) {
+      res.status(404).json({ message: "Payment not found" });
+      return;
+    }
+
+    // Undo this payment's effect on the trips before removing it, so the billed
+    // amount comes back off the trips and any "paid" trip reverts to outstanding.
+    if (Array.isArray(payment.allocations) && payment.allocations.length > 0) {
+      await reverseAllocations(payment.allocations);
+    } else {
+      // Legacy payment without tracked allocations — best-effort unwind by amount
+      const filter = payment.companyId
+        ? { clientId: { $in: (await Client.find({ company: payment.companyId }).select("_id")).map((c: any) => c._id) } }
+        : { clientId: payment.clientId };
+      await reverseFIFOByAmount(filter, payment.amount || 0);
+    }
+
     await Payment.findByIdAndDelete(req.params.paymentId);
     res.json({ message: "Payment deleted" });
   } catch (error) { next(error); }

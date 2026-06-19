@@ -34,6 +34,7 @@ export interface IBooking extends Document {
   advancePaid?: number;
   specialRequest?: string;
   status: string;
+  statusBeforePaid?: string; // status prior to being auto-marked "paid" by a ledger payment
   tripStatus?: string;
   timeline: Array<{
     title: string;
@@ -97,6 +98,7 @@ const BookingSchema: Schema = new Schema(
     advancePaid: { type: Number },
     specialRequest: { type: String },
     status: { type: String, default: "pending" },
+    statusBeforePaid: { type: String },
     tripStatus: { type: String },
     timeline: [
       {

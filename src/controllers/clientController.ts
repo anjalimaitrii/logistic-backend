@@ -111,6 +111,40 @@ export const loginClient = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// Admin login — verified against ADMIN_EMAIL / ADMIN_PASSWORD env vars (not the DB)
+export const loginAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { identifier, password } = req.body;
+
+    if (!identifier || !password) {
+      res.status(400).json({ message: "Email and password are required" });
+      return;
+    }
+
+    const adminEmail = process.env.ADMIN_EMAIL;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminEmail || !adminPassword) {
+      res.status(500).json({ message: "Admin credentials are not configured" });
+      return;
+    }
+
+    if (identifier !== adminEmail || password !== adminPassword) {
+      res.status(401).json({ message: "Invalid admin credentials" });
+      return;
+    }
+
+    const token = jwt.sign(
+      { role: "admin", email: adminEmail },
+      process.env.JWT_SECRET || "fallback_secret",
+      { expiresIn: "7d" }
+    );
+
+    res.status(200).json({ message: "Admin login successful", token, role: "admin" });
+  } catch (error: any) {
+    next(error);
+  }
+};
+
 export const getClients = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const companyId = req.query.companyId as string;

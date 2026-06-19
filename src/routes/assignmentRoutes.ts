@@ -8,6 +8,7 @@ import {
   getAssignmentsByDriver,
   promoteNextTrip,
   markTruckInspected,
+  getPendingInspections,
   getReturningDrivers
 } from "../controllers/assignmentController.js";
 
@@ -21,6 +22,7 @@ router.patch("/booking/:bookingId", updateAssignment);
 router.get("/truck/:truckId", getAssignmentsByTruck);
 router.get("/driver/:driverId", getAssignmentsByDriver);
 router.post("/driver/:driverId/promote-next", promoteNextTrip);
+router.get("/truck/:truckNumber/pending-inspections", getPendingInspections);
 router.patch("/driver/:driverId/mark-inspected", markTruckInspected);
 
 export default router;
