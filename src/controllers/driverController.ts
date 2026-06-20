@@ -31,14 +31,16 @@ export const getDrivers = async (req: Request, res: Response, next: NextFunction
       for (const assignment of activeAssignments) {
         const booking = assignment.bookingId as any;
         const ts = booking?.tripStatus?.toLowerCase();
-        if (ts === "returning" || ts === "completed") {
-          await Driver.updateOne(
-            { _id: assignment.driverId },
-            { driverStatus: "returning" }
-          );
-          // Update in-memory so the response reflects the correct state
-          const d = drivers.find(dr => dr._id.toString() === assignment.driverId?.toString());
+        const d = drivers.find(dr => dr._id.toString() === assignment.driverId?.toString());
+        if (ts === "returning") {
+          await Driver.updateOne({ _id: assignment.driverId }, { driverStatus: "returning" });
           if (d) (d as any).driverStatus = "returning";
+        } else if (ts === "completed" || ts === "delivered") {
+          // Trip finished → driver is free. Don't leave them stuck as "returning".
+          await Driver.updateOne({ _id: assignment.driverId },
+            { driverStatus: "available", needsTruckInspection: false, tripQueue: [] });
+          await Assignment.updateOne({ _id: assignment._id }, { queueStatus: "completed" });
+          if (d) (d as any).driverStatus = "available";
         }
       }
     }

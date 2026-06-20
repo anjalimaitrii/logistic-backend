@@ -14,7 +14,8 @@ export const getCompanyLedger = async (req: Request, res: Response, next: NextFu
 
     // All bookings for those clients
     const bookings = await Booking.find({ clientId: { $in: clientIds } })
-      .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations createdAt")
+      .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
+      .populate("clientId", "name")
       .sort({ createdAt: -1 });
 
     // All payments recorded against this company
@@ -39,7 +40,8 @@ export const getClientLedger = async (req: Request, res: Response, next: NextFun
     const { clientId } = req.params;
 
     const bookings = await Booking.find({ clientId })
-      .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations createdAt")
+      .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
+      .populate("clientId", "name")
       .sort({ createdAt: -1 });
 
     const payments = await Payment.find({ clientId }).sort({ paidAt: -1 });

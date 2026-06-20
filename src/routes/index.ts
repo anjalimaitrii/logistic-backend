@@ -17,24 +17,36 @@ import routeRoutes from "./routeRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import mileageRoutes from "./mileageRoutes.js";
 import ledgerRoutes from "./ledgerRoutes.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export function registerRoutes(app: Application): void {
-  app.use("/api/companies", companyRoutes);
+  // Shorthand guards
+  const admin = [requireAuth, requireRole("admin")]; // must be logged in AND an admin
+  const loggedIn = [requireAuth];                    // any logged-in user (admin or client)
+
+  // ── Public (no login needed) ──────────────────────────────────────────────
+  // clientRoutes guards its own admin-only endpoints inside; login/password are public.
   app.use("/api/clients", clientRoutes);
-  app.use("/api/bookings", bookingRoutes);
-  app.use("/api/trucks", truckRoutes);
-  app.use("/api/drivers", driverRoutes);
-  app.use("/api/assignments", assignmentRoutes);
-  app.use("/api/settlements", settlementRoutes);
-  app.use("/api/truck-inspections", truckInspectionRoutes);
+  // GPS data is fetched by the Next.js server-side proxy (no user token), so keep open.
   app.use("/api/livetrack", liveTrackingRoutes);
   app.use("/api/travel-summary", travelSummaryRoutes);
-  app.use("/api/toll", tollRoutes);
-  app.use("/api/goods-types", goodsTypeRoutes);
-  app.use("/api/upload", uploadRoutes);
-  app.use("/api/chat", chatRoutes);
-  app.use("/api/routes", routeRoutes);
-  app.use("/api/notifications", notificationRoutes);
-  app.use("/api/mileage", mileageRoutes);
-  app.use("/api/ledger", ledgerRoutes);
+
+  // ── Any logged-in user (admin or client) ──────────────────────────────────
+  app.use("/api/bookings", loggedIn, bookingRoutes);
+  app.use("/api/goods-types", loggedIn, goodsTypeRoutes);
+  app.use("/api/routes", loggedIn, routeRoutes);
+  app.use("/api/notifications", loggedIn, notificationRoutes);
+  app.use("/api/chat", loggedIn, chatRoutes);
+
+  // ── Admin only ────────────────────────────────────────────────────────────
+  app.use("/api/companies", admin, companyRoutes);
+  app.use("/api/trucks", admin, truckRoutes);
+  app.use("/api/drivers", admin, driverRoutes);
+  app.use("/api/assignments", admin, assignmentRoutes);
+  app.use("/api/settlements", admin, settlementRoutes);
+  app.use("/api/truck-inspections", admin, truckInspectionRoutes);
+  app.use("/api/toll", admin, tollRoutes);
+  app.use("/api/upload", admin, uploadRoutes);
+  app.use("/api/mileage", admin, mileageRoutes);
+  app.use("/api/ledger", admin, ledgerRoutes);
 }

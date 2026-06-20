@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import Booking from "../models/Booking.js";
+import Client from "../models/Client.js";
 import Notification from "../models/Notification.js";
 import { getIo } from "../socket.js";
 
@@ -28,9 +29,13 @@ export const createBooking = async (req: Request, res: Response, next: NextFunct
     }
     const tripId = `TRIP-${String(nextNumber).padStart(3, "0")}`;
 
+    // A client can only book under their own account; admin may book for any client
+    const user = (req as any).user;
+    const effectiveClientId = user?.role === "client" ? user.id : clientId;
+
     const bookingData: any = {
       tripId,
-      clientId,
+      clientId: effectiveClientId,
       cargoDetails,
       requirement,
       status: status || "pending",
@@ -130,8 +135,22 @@ export const createBooking = async (req: Request, res: Response, next: NextFunct
 
 export const getBookings = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const clientId = req.query.clientId as string;
-    const filter = clientId ? { clientId } : {};
+    const user = (req as any).user;
+    const isAdmin = user?.role === "admin";
+
+    let filter: any = {};
+    if (isAdmin) {
+      // Admin: optionally filter by a client, otherwise all bookings
+      const clientId = req.query.clientId as string;
+      filter = clientId ? { clientId } : {};
+    } else if (user?.company) {
+      // Client: only their company's bookings (covers both Personal & Company views)
+      const companyClients = await Client.find({ company: user.company }).select("_id");
+      filter = { clientId: { $in: companyClients.map((c: any) => c._id) } };
+    } else {
+      // Client without a company → only their own bookings
+      filter = { clientId: user?.id };
+    }
 
     const bookings = await Booking.find(filter)
       .populate({
@@ -164,6 +183,45 @@ export const getBookingById = async (req: Request, res: Response, next: NextFunc
   } catch (error: any) {
     next(error);
   }
+};
+
+// Cancel = hard delete. The booking is removed entirely, along with its assignment
+// and settlement, so nothing about it remains. Clients may only delete their own
+// company's booking, and only before the trip has started.
+export const cancelBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const user = (req as any).user;
+
+    const booking = await Booking.findById(id).select("clientId tripStatus");
+    if (!booking) {
+      res.status(404).json({ message: "Booking not found" });
+      return;
+    }
+
+    if (user?.role === "client") {
+      // Only the client who actually created the booking may cancel it — NOT
+      // company-mates. (Admin can cancel any.)
+      const sameClient = String(booking.clientId) === String(user.id);
+      if (!sameClient) {
+        res.status(403).json({ message: "Forbidden — only the client who created this booking can cancel it." });
+        return;
+      }
+      if (booking.tripStatus) {
+        res.status(403).json({ message: "Trip has already started — it can no longer be cancelled." });
+        return;
+      }
+    }
+
+    // Remove the booking and everything tied to it
+    const Assignment = (await import("../models/Assignment.js")).default;
+    const Settlement = (await import("../models/Settlement.js")).default;
+    await Assignment.deleteMany({ bookingId: id });
+    await Settlement.deleteMany({ bookingId: id });
+    await Booking.findByIdAndDelete(id);
+
+    res.json({ message: "Booking cancelled and removed" });
+  } catch (error) { next(error); }
 };
 
 export const updateBookingStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -254,9 +312,13 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
               $pull: { tripQueue: nextAssignment.bookingId }
             });
           } else {
+            // No more queued trips — the driver is free. The completion modal
+            // already captured the truck inspection, so they go straight to
+            // "available" instead of being sent back to "returning".
             await Driver.findByIdAndUpdate(driverId, {
-              driverStatus: "returning",
-              needsTruckInspection: true
+              driverStatus: "available",
+              needsTruckInspection: false,
+              tripQueue: []
             });
           }
         }

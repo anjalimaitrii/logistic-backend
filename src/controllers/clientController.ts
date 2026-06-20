@@ -90,9 +90,9 @@ export const loginClient = async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    // Generate Token
+    // Generate Token — include role + company so the server can authorize & scope requests
     const token = jwt.sign(
-      { id: client._id, email: client.email },
+      { id: client._id, email: client.email, role: "client", company: client.company },
       process.env.JWT_SECRET || "fallback_secret",
       { expiresIn: "7d" }
     );
@@ -147,14 +147,26 @@ export const loginAdmin = async (req: Request, res: Response, next: NextFunction
 
 export const getClients = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const companyId = req.query.companyId as string;
+    const user = (req as any).user;
+    const isAdmin = user?.role === "admin";
+
+    // Admin may query any company (or all). A client is locked to their OWN company.
+    const companyId = isAdmin ? (req.query.companyId as string) : user?.company;
+
+    if (!isAdmin && !companyId) {
+      // Client without a company → return only themselves, never the whole table
+      const self = await Client.findById(user?.id).select("-password").populate("company");
+      res.status(200).json(self ? [self] : []);
+      return;
+    }
+
     const filter = companyId ? { company: companyId } : {};
-    
+
     const clients = await Client.find(filter)
       .select("-password")
       .populate("company")
       .sort({ createdAt: -1 });
-      
+
     res.status(200).json(clients);
   } catch (error: any) {
     next(error);
