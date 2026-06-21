@@ -80,12 +80,12 @@ async function sendNightAlert(runningTrucks: any[], driverMap: Record<string, an
   <tr><td align="center">
     <table width="700" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
       <tr><td style="background:#0f172a;padding:28px 40px;">
-        <h1 style="margin:0;color:#fff;font-size:20px;font-weight:700;">FleetTrack</h1>
-        <p style="margin:4px 0 0;color:#f59e0b;font-size:11px;text-transform:uppercase;letter-spacing:2px;">⚠ Night Alert — Trucks Still Running at 7:30 PM</p>
+        <h1 style="margin:0;color:#fff;font-size:20px;font-weight:700;">Speedogistic</h1>
+        <p style="margin:4px 0 0;color:#f59e0b;font-size:11px;text-transform:uppercase;letter-spacing:2px;">⚠ Night Alert — Truck Running After Hours (7:30 PM–6:00 AM)</p>
       </td></tr>
       <tr><td style="padding:32px 40px;">
         <p style="margin:0 0 8px;color:#0f172a;font-size:15px;font-weight:600;">
-          ${runningTrucks.length} truck${runningTrucks.length > 1 ? "s are" : " is"} still active after 7:30 PM (CAT).
+          ${runningTrucks.length} truck${runningTrucks.length > 1 ? "s are" : " is"} running during night hours (7:30 PM–6:00 AM CAT).
         </p>
         <p style="margin:0 0 24px;color:#64748b;font-size:13px;">Please review and take appropriate action.</p>
         <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
@@ -103,7 +103,7 @@ async function sendNightAlert(runningTrucks: any[], driverMap: Record<string, an
         </table>
       </td></tr>
       <tr><td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center;">
-        <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} Maitrii Infotech · FleetTrack Automated Alert</p>
+        <p style="margin:0;color:#94a3b8;font-size:12px;">© ${new Date().getFullYear()} Maitrii Infotech · Speedogistic Automated Alert</p>
       </td></tr>
     </table>
   </td></tr>
@@ -114,7 +114,7 @@ async function sendNightAlert(runningTrucks: any[], driverMap: Record<string, an
     Source: process.env.AWS_SES_SENDER_EMAIL!,
     Destination: { ToAddresses: [ADMIN_EMAIL] },
     Message: {
-      Subject: { Data: `⚠ FleetTrack Night Alert — ${runningTrucks.length} Truck(s) Still Running`, Charset: "UTF-8" },
+      Subject: { Data: `⚠ Speedogistic Night Alert — ${runningTrucks.length} Truck(s) Running After Hours`, Charset: "UTF-8" },
       Body: { Html: { Data: html, Charset: "UTF-8" } },
     },
   }));
@@ -122,15 +122,43 @@ async function sendNightAlert(runningTrucks: any[], driverMap: Record<string, an
   console.log(`[NightAlert] Email sent to ${ADMIN_EMAIL} for ${runningTrucks.length} running trucks`);
 }
 
+// Night window: 7:30 PM → 6:00 AM CAT (Africa/Lusaka, UTC+2, no DST).
+const WINDOW_START_MIN = 19 * 60 + 30; // 19:30 CAT
+const WINDOW_END_MIN   = 6 * 60;        // 06:00 CAT
+
+// Current minutes-since-midnight in CAT (UTC+2).
+function catMinutesNow(): number {
+  const now = new Date();
+  return ((now.getUTCHours() * 60 + now.getUTCMinutes()) + 120) % 1440;
+}
+
+// Window wraps past midnight: [19:30, 24:00) ∪ [00:00, 06:00).
+function inNightWindow(min: number): boolean {
+  return min >= WINDOW_START_MIN || min < WINDOW_END_MIN;
+}
+
+// Trucks already alerted in the current night — avoids re-emailing the same
+// truck every 30 min. Reset once we leave the window. In-memory (resets on
+// server restart, which is acceptable).
+const alertedTonight = new Set<string>();
+
 export function startNightAlertCron() {
-  // Runs at 7:30 PM CAT (UTC+2) = 17:30 UTC
-  // Cron: minute=30, hour=17, every day
-  cron.schedule("30 17 * * *", async () => {
-    console.log("[NightAlert] Running 7:30 PM check...");
+  // Check every 30 min; act only inside the 7:30 PM–6:00 AM CAT window.
+  cron.schedule("*/30 * * * *", async () => {
+    if (!inNightWindow(catMinutesNow())) {
+      alertedTonight.clear(); // outside the window → reset for the next night
+      return;
+    }
+    console.log("[NightAlert] In-window check (7:30 PM–6:00 AM CAT)...");
     try {
       const runningTrucks = await getRunningTrucks();
-      if (runningTrucks.length === 0) {
-        console.log("[NightAlert] No trucks running — no alert sent.");
+      // Only trucks not already alerted earlier tonight (dedup per night)
+      const fresh = runningTrucks.filter((v: any) => {
+        const id = v.Vehicle_No || v.Vehicle_Name || "";
+        return id && !alertedTonight.has(id);
+      });
+      if (fresh.length === 0) {
+        console.log("[NightAlert] No new running trucks — no alert sent.");
         return;
       }
 
@@ -152,11 +180,12 @@ export function startNightAlertCron() {
         if (a.truckNumber) assignmentMap[a.truckNumber] = a;
       });
 
-      await sendNightAlert(runningTrucks, driverMap, assignmentMap);
+      await sendNightAlert(fresh, driverMap, assignmentMap);
+      fresh.forEach((v: any) => alertedTonight.add(v.Vehicle_No || v.Vehicle_Name));
     } catch (err: any) {
       console.error("[NightAlert] Error:", err.message);
     }
   }, { timezone: "UTC" });
 
-  console.log("[NightAlert] Cron scheduled — alert at 7:30 PM CAT (17:30 UTC) daily");
+  console.log("[NightAlert] Cron scheduled — every 30 min during 7:30 PM–6:00 AM CAT");
 }

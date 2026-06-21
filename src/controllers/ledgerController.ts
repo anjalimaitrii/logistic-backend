@@ -3,6 +3,12 @@ import Booking from "../models/Booking.js";
 import Payment from "../models/Payment.js";
 import Client from "../models/Client.js";
 
+// Secret, off-the-books (without-tax) jobs must never appear in client ledgers —
+// excluded from both the booking list and the billed/outstanding totals.
+const EXCLUDE_SECRET = {
+  $nor: [{ withTax: false, $or: [{ isSecret: true }, { "metadata.isSecret": true }] }],
+};
+
 // GET /api/ledger/company/:companyId
 export const getCompanyLedger = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -13,7 +19,7 @@ export const getCompanyLedger = async (req: Request, res: Response, next: NextFu
     const clientIds = clients.map((c: any) => c._id);
 
     // All bookings for those clients
-    const bookings = await Booking.find({ clientId: { $in: clientIds } })
+    const bookings = await Booking.find({ clientId: { $in: clientIds }, ...EXCLUDE_SECRET })
       .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
       .populate("clientId", "name")
       .sort({ createdAt: -1 });
@@ -39,7 +45,7 @@ export const getClientLedger = async (req: Request, res: Response, next: NextFun
   try {
     const { clientId } = req.params;
 
-    const bookings = await Booking.find({ clientId })
+    const bookings = await Booking.find({ clientId, ...EXCLUDE_SECRET })
       .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
       .populate("clientId", "name")
       .sort({ createdAt: -1 });
@@ -139,7 +145,7 @@ export const addCompanyPayment = async (req: Request, res: Response, next: NextF
     const clients = await Client.find({ company: companyId }).select("_id");
     const clientIds = clients.map((c: any) => c._id);
     // sort: 1 = ascending = oldest first (FIFO)
-    const bookings = await Booking.find({ clientId: { $in: clientIds } })
+    const bookings = await Booking.find({ clientId: { $in: clientIds }, ...EXCLUDE_SECRET })
       .select("_id finalAmount advancePaid status createdAt")
       .sort({ createdAt: 1 });
     const allocations = await allocateFIFO(bookings, Number(amount));
@@ -160,7 +166,7 @@ export const addClientPayment = async (req: Request, res: Response, next: NextFu
     const payment = await Payment.create({ clientId, amount: Number(amount), note: note || "", paidAt: paidAt ? new Date(paidAt) : new Date() });
 
     // sort: 1 = ascending = oldest first (FIFO)
-    const bookings = await Booking.find({ clientId })
+    const bookings = await Booking.find({ clientId, ...EXCLUDE_SECRET })
       .select("_id finalAmount advancePaid status createdAt")
       .sort({ createdAt: 1 });
     const allocations = await allocateFIFO(bookings, Number(amount));
@@ -194,8 +200,8 @@ export const deletePayment = async (req: Request, res: Response, next: NextFunct
     } else {
       // Legacy payment without tracked allocations — best-effort unwind by amount
       const filter = payment.companyId
-        ? { clientId: { $in: (await Client.find({ company: payment.companyId }).select("_id")).map((c: any) => c._id) } }
-        : { clientId: payment.clientId };
+        ? { clientId: { $in: (await Client.find({ company: payment.companyId }).select("_id")).map((c: any) => c._id) }, ...EXCLUDE_SECRET }
+        : { clientId: payment.clientId, ...EXCLUDE_SECRET };
       await reverseFIFOByAmount(filter, payment.amount || 0);
     }
 
