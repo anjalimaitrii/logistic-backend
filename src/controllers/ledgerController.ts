@@ -9,17 +9,24 @@ const EXCLUDE_SECRET = {
   $nor: [{ withTax: false, $or: [{ isSecret: true }, { "metadata.isSecret": true }] }],
 };
 
+// The secret-portal ledger passes includeSecret to see the COMPLETE picture
+// (regular + secret trips). The normal client ledger keeps secret jobs hidden.
+const secretFilter = (includeSecret: boolean) => (includeSecret ? {} : EXCLUDE_SECRET);
+const wantsSecret = (v: any) => v === "1" || v === "true" || v === true;
+
 // GET /api/ledger/company/:companyId
 export const getCompanyLedger = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { companyId } = req.params;
+
+    const sf = secretFilter(wantsSecret(req.query.includeSecret));
 
     // All clients under this company (field is `company`, not `companyId`)
     const clients = await Client.find({ company: companyId }).select("_id name");
     const clientIds = clients.map((c: any) => c._id);
 
     // All bookings for those clients
-    const bookings = await Booking.find({ clientId: { $in: clientIds }, ...EXCLUDE_SECRET })
+    const bookings = await Booking.find({ clientId: { $in: clientIds }, ...sf })
       .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
       .populate("clientId", "name")
       .sort({ createdAt: -1 });
@@ -44,8 +51,9 @@ export const getCompanyLedger = async (req: Request, res: Response, next: NextFu
 export const getClientLedger = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { clientId } = req.params;
+    const sf = secretFilter(wantsSecret(req.query.includeSecret));
 
-    const bookings = await Booking.find({ clientId, ...EXCLUDE_SECRET })
+    const bookings = await Booking.find({ clientId, ...sf })
       .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
       .populate("clientId", "name")
       .sort({ createdAt: -1 });
@@ -135,17 +143,18 @@ async function reverseFIFOByAmount(bookingFilter: any, amount: number): Promise<
 export const addCompanyPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const companyId = String(req.params.companyId);
-    const { amount, note, paidAt } = req.body;
+    const { amount, note, paidAt, includeSecret } = req.body;
     if (!amount || Number(amount) <= 0) { res.status(400).json({ message: "Valid amount required" }); return; }
 
     // Save payment record
     const payment = await Payment.create({ companyId, amount: Number(amount), note: note || "", paidAt: paidAt ? new Date(paidAt) : new Date() });
 
     // FIFO allocation across company's bookings
+    const sf = secretFilter(wantsSecret(includeSecret));
     const clients = await Client.find({ company: companyId }).select("_id");
     const clientIds = clients.map((c: any) => c._id);
     // sort: 1 = ascending = oldest first (FIFO)
-    const bookings = await Booking.find({ clientId: { $in: clientIds }, ...EXCLUDE_SECRET })
+    const bookings = await Booking.find({ clientId: { $in: clientIds }, ...sf })
       .select("_id finalAmount advancePaid status createdAt")
       .sort({ createdAt: 1 });
     const allocations = await allocateFIFO(bookings, Number(amount));
@@ -160,13 +169,14 @@ export const addCompanyPayment = async (req: Request, res: Response, next: NextF
 export const addClientPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const clientId = String(req.params.clientId);
-    const { amount, note, paidAt } = req.body;
+    const { amount, note, paidAt, includeSecret } = req.body;
     if (!amount || Number(amount) <= 0) { res.status(400).json({ message: "Valid amount required" }); return; }
 
     const payment = await Payment.create({ clientId, amount: Number(amount), note: note || "", paidAt: paidAt ? new Date(paidAt) : new Date() });
 
     // sort: 1 = ascending = oldest first (FIFO)
-    const bookings = await Booking.find({ clientId, ...EXCLUDE_SECRET })
+    const sf = secretFilter(wantsSecret(includeSecret));
+    const bookings = await Booking.find({ clientId, ...sf })
       .select("_id finalAmount advancePaid status createdAt")
       .sort({ createdAt: 1 });
     const allocations = await allocateFIFO(bookings, Number(amount));

@@ -3,6 +3,7 @@ import Booking from "../models/Booking.js";
 import Client from "../models/Client.js";
 import Notification from "../models/Notification.js";
 import { getIo } from "../socket.js";
+import { fileCompletedBooking } from "../services/completionRecords.js";
 
 export const createBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -324,6 +325,13 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
         }
       } catch (promoteErr) {
         console.error("Auto-promote failed (non-critical):", promoteErr);
+      }
+
+      // File the completed trip: with tax → Invoice (inv-xxx), without → Cash (cash-xxx)
+      try {
+        await fileCompletedBooking(updatedBooking);
+      } catch (fileErr) {
+        console.error("Invoice/Cash filing failed (non-critical):", fileErr);
       }
     }
 

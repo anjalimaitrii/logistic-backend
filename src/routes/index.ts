@@ -17,6 +17,8 @@ import routeRoutes from "./routeRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import mileageRoutes from "./mileageRoutes.js";
 import ledgerRoutes from "./ledgerRoutes.js";
+import invoiceRoutes from "./invoiceRoutes.js";
+import cashRoutes from "./cashRoutes.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export function registerRoutes(app: Application): void {
@@ -49,4 +51,6 @@ export function registerRoutes(app: Application): void {
   app.use("/api/upload", admin, uploadRoutes);
   app.use("/api/mileage", admin, mileageRoutes);
   app.use("/api/ledger", admin, ledgerRoutes);
+  app.use("/api/invoices", admin, invoiceRoutes);
+  app.use("/api/cash", admin, cashRoutes);
 }
