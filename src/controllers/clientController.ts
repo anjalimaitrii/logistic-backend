@@ -121,10 +121,10 @@ export const loginAdmin = async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    // Multiple admin accounts — add more ADMIN_EMAIL_n / ADMIN_PASSWORD_n pairs in env.
+    // Multiple admin accounts — add more ADMIN_EMAIL_n / ADMIN_PASSWORD_n / ADMIN_NAME_n in env.
     const admins = [
-      { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD },
-      { email: process.env.ADMIN_EMAIL_2, password: process.env.ADMIN_PASSWORD_2 },
+      { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD, name: process.env.ADMIN_NAME || "Admin" },
+      { email: process.env.ADMIN_EMAIL_2, password: process.env.ADMIN_PASSWORD_2, name: process.env.ADMIN_NAME_2 || "Admin" },
     ].filter((a) => a.email && a.password);
 
     if (admins.length === 0) {
@@ -139,12 +139,12 @@ export const loginAdmin = async (req: Request, res: Response, next: NextFunction
     }
 
     const token = jwt.sign(
-      { role: "admin", email: match.email },
+      { role: "admin", email: match.email, name: match.name },
       process.env.JWT_SECRET || "fallback_secret",
       { expiresIn: "7d" }
     );
 
-    res.status(200).json({ message: "Admin login successful", token, role: "admin" });
+    res.status(200).json({ message: "Admin login successful", token, role: "admin", name: match.name, email: match.email });
   } catch (error: any) {
     next(error);
   }

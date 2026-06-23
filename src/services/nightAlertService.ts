@@ -4,7 +4,11 @@ import Driver from "../models/Driver.js";
 import Assignment from "../models/Assignment.js";
 
 const TRAKZEE_BASE = process.env.TRAKZEE_BASE_URL || "http://13.127.228.11/webservice";
-const ADMIN_EMAIL  = process.env.ADMIN_ALERT_EMAIL || process.env.AWS_SES_SENDER_EMAIL!;
+// Recipients — comma-separated list in ADMIN_ALERT_EMAIL (e.g. "a@x.com,b@y.com").
+const ADMIN_EMAILS = (process.env.ADMIN_ALERT_EMAIL || process.env.AWS_SES_SENDER_EMAIL || "")
+  .split(",")
+  .map((e) => e.trim())
+  .filter(Boolean);
 
 const getSES = () => new SESClient({
   region: process.env.AWS_REGION || "ap-south-1",
@@ -112,14 +116,14 @@ async function sendNightAlert(runningTrucks: any[], driverMap: Record<string, an
 
   await getSES().send(new SendEmailCommand({
     Source: process.env.AWS_SES_SENDER_EMAIL!,
-    Destination: { ToAddresses: [ADMIN_EMAIL] },
+    Destination: { ToAddresses: ADMIN_EMAILS },
     Message: {
       Subject: { Data: `⚠ Speedogistic Night Alert — ${runningTrucks.length} Truck(s) Running After Hours`, Charset: "UTF-8" },
       Body: { Html: { Data: html, Charset: "UTF-8" } },
     },
   }));
 
-  console.log(`[NightAlert] Email sent to ${ADMIN_EMAIL} for ${runningTrucks.length} running trucks`);
+  console.log(`[NightAlert] Email sent to ${ADMIN_EMAILS.join(", ")} for ${runningTrucks.length} running trucks`);
 }
 
 // Night window: 7:30 PM → 6:00 AM CAT (Africa/Lusaka, UTC+2, no DST).
