@@ -121,20 +121,25 @@ export const loginAdmin = async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    const adminEmail = process.env.ADMIN_EMAIL;
-    const adminPassword = process.env.ADMIN_PASSWORD;
-    if (!adminEmail || !adminPassword) {
+    // Multiple admin accounts — add more ADMIN_EMAIL_n / ADMIN_PASSWORD_n pairs in env.
+    const admins = [
+      { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD },
+      { email: process.env.ADMIN_EMAIL_2, password: process.env.ADMIN_PASSWORD_2 },
+    ].filter((a) => a.email && a.password);
+
+    if (admins.length === 0) {
       res.status(500).json({ message: "Admin credentials are not configured" });
       return;
     }
 
-    if (identifier !== adminEmail || password !== adminPassword) {
+    const match = admins.find((a) => a.email === identifier && a.password === password);
+    if (!match) {
       res.status(401).json({ message: "Invalid admin credentials" });
       return;
     }
 
     const token = jwt.sign(
-      { role: "admin", email: adminEmail },
+      { role: "admin", email: match.email },
       process.env.JWT_SECRET || "fallback_secret",
       { expiresIn: "7d" }
     );
