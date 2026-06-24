@@ -76,6 +76,8 @@ export const sendClientWelcomeEmail = async (opts: {
 }): Promise<void> => {
   const { toEmail, password } = opts;
   const clientName = toTitleCase(opts.clientName);
+  // Login link — per-environment (dev/prod) via FRONTEND_URL; prod URL as default.
+  const loginUrl = process.env.FRONTEND_URL || "https://fleet.maitriiinfotech.com/";
 
   const htmlBody = `
 <!DOCTYPE html>
@@ -149,7 +151,7 @@ export const sendClientWelcomeEmail = async (opts: {
               <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
                 <tr>
                   <td align="center">
-                    <a href="https://logistic-three-smoky.vercel.app/" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:8px;letter-spacing:0.5px;">Login to Dashboard</a>
+                    <a href="${loginUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:8px;letter-spacing:0.5px;">Login to Dashboard</a>
                   </td>
                 </tr>
               </table>
@@ -185,7 +187,7 @@ Password: ${password}
 
 Please change your password after your first login.
 
-Login here: https://logistic-three-smoky.vercel.app/
+Login here: ${loginUrl}
 
 Visit us at https://www.maitriiinfotech.com/
 © ${new Date().getFullYear()} Maitrii Infotech
