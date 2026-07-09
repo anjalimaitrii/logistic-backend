@@ -8,11 +8,8 @@ export interface ITruckInspection extends Document {
   tyreCondition: string;
   tyreNumber?: string;
   challans?: string;
-  deliveryOrders?: string[];
-  damages?: Array<{ quantity: string; amount: string }>;
   notes: string;
   inspectedAt: Date;
-  attachments: Array<{ name: string; data: string; mimeType: string; size: number }>;
 }
 
 const TruckInspectionSchema: Schema = new Schema(
@@ -26,23 +23,8 @@ const TruckInspectionSchema: Schema = new Schema(
     tyreCondition:  { type: String, required: true },
     tyreNumber:     { type: String, default: "" },
     challans:       { type: String, default: "" },
-    deliveryOrders: [{ type: String }],
-    damages: [
-      {
-        quantity: { type: String },
-        amount:   { type: String },
-      }
-    ],
     notes:        { type: String, default: "" },
     inspectedAt:  { type: Date, default: Date.now },
-    attachments: [
-      {
-        name:     { type: String },
-        data:     { type: String },
-        mimeType: { type: String },
-        size:     { type: Number },
-      }
-    ],
   },
   { timestamps: true }
 );

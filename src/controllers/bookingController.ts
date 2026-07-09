@@ -228,11 +228,14 @@ export const cancelBooking = async (req: Request, res: Response, next: NextFunct
 export const updateBookingStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment, tripStartCoords, tripEndCoords } = req.body;
+    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment, tripStartCoords, tripEndCoords, deliveryOrders, damages, attachments } = req.body;
 
     const updateData: any = {};
     if (status) updateData.status = status;
     if (tripStatus) updateData.tripStatus = tripStatus;
+    if (deliveryOrders !== undefined) updateData.deliveryOrders = deliveryOrders;
+    if (damages !== undefined) updateData.damages = damages;
+    if (attachments !== undefined) updateData.attachments = attachments;
     if (tripStatus === "started" && tripStartCoords) {
       updateData.tripStartCoords = tripStartCoords;
       updateData.tripStartedAt = new Date();
@@ -273,8 +276,8 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
       return;
     }
 
-    // When driver marks returning → update their driverStatus so they appear available for queueing
-    if (tripStatus === "returning") {
+    // When driver marks offloading/returning → update their driverStatus so they appear available for queueing
+    if (tripStatus === "offloading" || tripStatus === "returning") {
       try {
         const Assignment = (await import("../models/Assignment.js")).default;
         const Driver = (await import("../models/Driver.js")).default;
@@ -282,11 +285,11 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
         const assignment = await Assignment.findOne({ bookingId: id });
         if (assignment?.driverId) {
           await Driver.findByIdAndUpdate(assignment.driverId, {
-            driverStatus: "returning"
+            driverStatus: tripStatus
           });
         }
       } catch (err) {
-        console.error("Driver returning status update failed (non-critical):", err);
+        console.error("Driver status update failed (non-critical):", err);
       }
     }
 
@@ -310,6 +313,7 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
           if (nextAssignment) {
             await Assignment.findByIdAndUpdate(nextAssignment._id, { queueStatus: "active" });
             await Driver.findByIdAndUpdate(driverId, {
+              $set: { driverStatus: "on_trip" },
               $pull: { tripQueue: nextAssignment.bookingId }
             });
           } else {

@@ -33,6 +33,9 @@ export interface IBooking extends Document {
   finalAmount?: number;
   advancePaid?: number;
   specialRequest?: string;
+  deliveryOrders?: string[];
+  damages?: Array<{ quantity: string; amount: number }>;
+  attachments?: string[];
   status: string;
   statusBeforePaid?: string; // status prior to being auto-marked "paid" by a ledger payment
   tripStatus?: string;
@@ -97,6 +100,14 @@ const BookingSchema: Schema = new Schema(
     finalAmount: { type: Number },
     advancePaid: { type: Number },
     specialRequest: { type: String },
+    deliveryOrders: { type: [String], default: [] },
+    damages: [
+      {
+        quantity: { type: String },
+        amount: { type: Number }
+      }
+    ],
+    attachments: { type: [String], default: [] },
     status: { type: String, default: "pending" },
     statusBeforePaid: { type: String },
     tripStatus: { type: String },

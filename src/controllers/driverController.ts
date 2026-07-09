@@ -17,9 +17,9 @@ export const getDrivers = async (req: Request, res: Response, next: NextFunction
   try {
     const drivers = await Driver.find().populate("assignedTruck");
 
-    // Sync driverStatus for any "on_trip" driver whose active booking tripStatus has moved on
+    // Sync driverStatus for any "on_trip"/"offloading" driver whose active booking tripStatus has moved on
     const onTripIds = drivers
-      .filter(d => d.driverStatus === "on_trip")
+      .filter(d => d.driverStatus === "on_trip" || d.driverStatus === "offloading")
       .map(d => d._id);
 
     if (onTripIds.length > 0) {
@@ -32,7 +32,10 @@ export const getDrivers = async (req: Request, res: Response, next: NextFunction
         const booking = assignment.bookingId as any;
         const ts = booking?.tripStatus?.toLowerCase();
         const d = drivers.find(dr => dr._id.toString() === assignment.driverId?.toString());
-        if (ts === "returning") {
+        if (ts === "offloading" && d?.driverStatus !== "offloading") {
+          await Driver.updateOne({ _id: assignment.driverId }, { driverStatus: "offloading" });
+          if (d) (d as any).driverStatus = "offloading";
+        } else if (ts === "returning") {
           await Driver.updateOne({ _id: assignment.driverId }, { driverStatus: "returning" });
           if (d) (d as any).driverStatus = "returning";
         } else if (ts === "completed" || ts === "delivered") {

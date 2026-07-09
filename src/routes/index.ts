@@ -19,6 +19,7 @@ import mileageRoutes from "./mileageRoutes.js";
 import ledgerRoutes from "./ledgerRoutes.js";
 import invoiceRoutes from "./invoiceRoutes.js";
 import cashRoutes from "./cashRoutes.js";
+import driverAppRoutes from "./driverAppRoutes.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export function registerRoutes(app: Application): void {
@@ -32,6 +33,7 @@ export function registerRoutes(app: Application): void {
   // GPS data is fetched by the Next.js server-side proxy (no user token), so keep open.
   app.use("/api/livetrack", liveTrackingRoutes);
   app.use("/api/travel-summary", travelSummaryRoutes);
+  app.use("/api/driver-app", driverAppRoutes);
 
   // ── Any logged-in user (admin or client) ──────────────────────────────────
   app.use("/api/bookings", loggedIn, bookingRoutes);
@@ -39,6 +41,7 @@ export function registerRoutes(app: Application): void {
   app.use("/api/routes", loggedIn, routeRoutes);
   app.use("/api/notifications", loggedIn, notificationRoutes);
   app.use("/api/chat", loggedIn, chatRoutes);
+  app.use("/api/upload", loggedIn, uploadRoutes);
 
   // ── Admin only ────────────────────────────────────────────────────────────
   app.use("/api/companies", admin, companyRoutes);
@@ -48,7 +51,6 @@ export function registerRoutes(app: Application): void {
   app.use("/api/settlements", admin, settlementRoutes);
   app.use("/api/truck-inspections", admin, truckInspectionRoutes);
   app.use("/api/toll", admin, tollRoutes);
-  app.use("/api/upload", admin, uploadRoutes);
   app.use("/api/mileage", admin, mileageRoutes);
   app.use("/api/ledger", admin, ledgerRoutes);
   app.use("/api/invoices", admin, invoiceRoutes);

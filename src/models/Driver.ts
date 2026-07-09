@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
+import bcrypt from "bcryptjs";
 
 export interface IDriver {
   name: string;
@@ -8,9 +9,10 @@ export interface IDriver {
   experience: number;
   assignedTruck?: mongoose.Types.ObjectId;
   status: string; // Active, On Leave, Suspended
-  driverStatus: string; // available, on_trip, returning, under_inspection
+  driverStatus: string; // available, on_trip, offloading, returning, under_inspection
   tripQueue: mongoose.Types.ObjectId[];
   needsTruckInspection: boolean;
+  password?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,11 +26,21 @@ const DriverSchema: Schema = new Schema(
     experience: { type: Number, default: 0 },
     assignedTruck: { type: Schema.Types.ObjectId, ref: "Truck" },
     status: { type: String, default: "Active" },
-    driverStatus: { type: String, default: "available" }, // available, on_trip, returning, under_inspection
+    driverStatus: { type: String, default: "available" }, // available, on_trip, offloading, returning, under_inspection
     tripQueue: [{ type: Schema.Types.ObjectId, ref: "Booking" }],
     needsTruckInspection: { type: Boolean, default: false },
+    password: { type: String },
   },
   { timestamps: true }
 );
 
-export default mongoose.model<IDriver>("Driver", DriverSchema);
+// Hash password before saving
+DriverSchema.pre("save", async function (this: any) {
+  if (!this.isModified("password") || !this.password) {
+    return;
+  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
+
+export default mongoose.model<IDriver & Document>("Driver", DriverSchema);

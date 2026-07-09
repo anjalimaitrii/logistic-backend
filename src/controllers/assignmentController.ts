@@ -15,6 +15,7 @@ const promoteOrReturnDriver = async (driverId: string) => {
   if (nextAssignment) {
     await Assignment.findByIdAndUpdate(nextAssignment._id, { queueStatus: "active" });
     await Driver.findByIdAndUpdate(driverId, {
+      $set: { driverStatus: "on_trip" },
       $pull: { tripQueue: nextAssignment.bookingId }
     });
     await Booking.findByIdAndUpdate(nextAssignment.bookingId, {
@@ -54,57 +55,90 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
     let queueStatus = "active";
     let sequence = 1;
 
-    if (driver.driverStatus === "on_trip" || driver.driverStatus === "returning") {
-      // Driver is busy — queue this assignment
-      const existingCount = await Assignment.countDocuments({
-        driverId,
-        queueStatus: { $in: ["active", "queued"] }
-      });
-      queueStatus = "queued";
-      sequence = existingCount + 1;
-
-      await Driver.findByIdAndUpdate(driverId, {
-        $push: { tripQueue: bookingId }
-      });
-
-      // If driver is returning, find their returning trip and log new job on its timeline
-      if (driver.driverStatus === "returning") {
+    if (driver.driverStatus === "on_trip" || driver.driverStatus === "offloading" || driver.driverStatus === "returning") {
+      if (driver.driverStatus === "returning" || driver.driverStatus === "offloading") {
         try {
-          // Find all assignments for this driver and get the one whose booking is in "returning" state
+          // Find all assignments for this driver and get the one whose booking is on its
+          // final leg (offloading or returning) — both mean the driver is assignable.
           const driverAssignments = await Assignment.find({ driverId }).select("bookingId").lean();
           const allBookingIds = driverAssignments.map((a: any) => a.bookingId);
 
-          const returningBooking = await Booking.findOne({
+          const currentLegBooking = await Booking.findOne({
             _id: { $in: allBookingIds },
-            tripStatus: "returning"
-          }).select("_id tripId");
+            tripStatus: { $in: ["offloading", "returning"] }
+          }).select("_id tripId tripStatus");
 
-          if (returningBooking) {
+          if (currentLegBooking) {
             const newBookingDoc = await Booking.findById(bookingId).select("tripId");
             const newTripLabel = newBookingDoc?.tripId || `#${String(bookingId).slice(-6).toUpperCase()}`;
 
-            // Assigning a new job ends the return leg — mark the returning trip
+            // Assigning a new job ends the current leg — mark the offloading/returning trip
             // completed and freeze the truck's current position as its end point.
             // Prefer the coords the client captured; otherwise look them up
             // server-side so the end point is reliably set either way.
             const endCoords = returningEndCoords || (await getVehiclePosition(truckNumber));
-            await Booking.findByIdAndUpdate(returningBooking._id, {
+            await Booking.findByIdAndUpdate(currentLegBooking._id, {
               tripStatus: "completed",
               tripEndedAt: new Date(),
               ...(endCoords ? { tripEndCoords: endCoords } : {}),
               $push: {
                 timeline: {
                   title: "New Job Assigned",
-                  description: `${newTripLabel} assigned to driver while returning — trip completed`,
+                  description: `${newTripLabel} assigned to driver while ${currentLegBooking.tripStatus} — trip completed`,
                   time: new Date(),
                   status: "completed"
                 }
               }
             });
+
+            // Mark previous assignment as completed
+            await Assignment.updateOne(
+              { bookingId: currentLegBooking._id },
+              { queueStatus: "completed" }
+            );
+
+            // Update driver to on_trip
+            await Driver.findByIdAndUpdate(driverId, { driverStatus: "on_trip" });
+
+            queueStatus = "active";
+            sequence = 1;
+          } else {
+            // Queue fallback if returning booking not found
+            const existingCount = await Assignment.countDocuments({
+              driverId,
+              queueStatus: { $in: ["active", "queued"] }
+            });
+            queueStatus = "queued";
+            sequence = existingCount + 1;
+            await Driver.findByIdAndUpdate(driverId, {
+              $push: { tripQueue: bookingId }
+            });
           }
         } catch (err) {
           console.error("Failed to log new job on returning trip timeline:", err);
+          // Queue fallback
+          const existingCount = await Assignment.countDocuments({
+            driverId,
+            queueStatus: { $in: ["active", "queued"] }
+          });
+          queueStatus = "queued";
+          sequence = existingCount + 1;
+          await Driver.findByIdAndUpdate(driverId, {
+            $push: { tripQueue: bookingId }
+          });
         }
+      } else {
+        // Driver is busy on a non-returning leg — queue this assignment
+        const existingCount = await Assignment.countDocuments({
+          driverId,
+          queueStatus: { $in: ["active", "queued"] }
+        });
+        queueStatus = "queued";
+        sequence = existingCount + 1;
+
+        await Driver.findByIdAndUpdate(driverId, {
+          $push: { tripQueue: bookingId }
+        });
       }
     } else {
       // available (or legacy driver without driverStatus) — start immediately
@@ -288,11 +322,9 @@ export const getPendingInspections = async (req: Request, res: Response, next: N
 };
 
 // Mark truck as inspected → save to TruckInspection history + driver becomes available.
-// Optionally records damages/DO for earlier trips that were auto-completed while
-// returning (pastTrips), each saved as its own trip-linked inspection record.
 export const markTruckInspected = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { driverId } = req.params;
-  const { bookingId, vehicleCondition, tyreCondition, tyreNumber, challans, deliveryOrders, damages, notes, attachments, pastTrips } = req.body;
+  const { bookingId, vehicleCondition, tyreCondition, tyreNumber, challans, notes } = req.body;
   try {
     const driver = await Driver.findById(driverId);
 
@@ -305,35 +337,10 @@ export const markTruckInspected = async (req: Request, res: Response, next: Next
       tyreCondition:    tyreCondition || "Good",
       tyreNumber:       tyreNumber || "",
       challans:         challans || "",
-      deliveryOrders:   deliveryOrders || [],
-      damages:          damages || [],
       notes:            notes || "",
       inspectedAt:      new Date(),
-      attachments:      attachments || [],
     });
     await inspection.save();
-
-    // Record damages/DO for earlier auto-completed trips that were never inspected.
-    // The truck wasn't physically inspected for these, so condition fields read
-    // "Not Inspected" — only damages/DO are captured per the admin's entry.
-    if (Array.isArray(pastTrips) && pastTrips.length > 0) {
-      const pastDocs = pastTrips
-        .filter((t: any) => t?.bookingId)
-        .map((t: any) => ({
-          driverId,
-          truckId:          driver?.assignedTruck || null,
-          bookingId:        t.bookingId,
-          vehicleCondition: "Not Inspected",
-          tyreCondition:    "Not Inspected",
-          deliveryOrders:   t.deliveryOrders || [],
-          damages:          t.damages || [],
-          notes:            "Recorded during a later trip's completion (truck did not return between trips).",
-          inspectedAt:      new Date(),
-        }));
-      if (pastDocs.length > 0) {
-        await TruckInspection.insertMany(pastDocs);
-      }
-    }
 
     // Reset driver to available
     await Driver.findByIdAndUpdate(driverId, {
