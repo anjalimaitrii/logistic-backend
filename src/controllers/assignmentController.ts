@@ -4,6 +4,7 @@ import Booking from "../models/Booking.js";
 import Driver from "../models/Driver.js";
 import TruckInspection from "../models/TruckInspection.js";
 import { getVehiclePosition } from "./liveTrackingController.js";
+import { fileCompletedBooking } from "../services/completionRecords.js";
 
 // Internal helper: promote next queued trip for a driver, or set to returning
 const promoteOrReturnDriver = async (driverId: string) => {
@@ -77,7 +78,7 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
             // Prefer the coords the client captured; otherwise look them up
             // server-side so the end point is reliably set either way.
             const endCoords = returningEndCoords || (await getVehiclePosition(truckNumber));
-            await Booking.findByIdAndUpdate(currentLegBooking._id, {
+            const completedBooking = await Booking.findByIdAndUpdate(currentLegBooking._id, {
               tripStatus: "completed",
               tripEndedAt: new Date(),
               ...(endCoords ? { tripEndCoords: endCoords } : {}),
@@ -89,7 +90,14 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
                   status: "completed"
                 }
               }
-            });
+            }, { new: true });
+
+            // Force-completed trips must land in the ledger too: with tax → INV, without → CASH
+            try {
+              await fileCompletedBooking(completedBooking);
+            } catch (fileErr) {
+              console.error("[Assignment] Invoice/Cash filing failed (non-critical):", fileErr);
+            }
 
             // Mark previous assignment as completed
             await Assignment.updateOne(

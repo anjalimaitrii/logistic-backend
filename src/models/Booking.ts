@@ -50,6 +50,7 @@ export interface IBooking extends Document {
   tripEndCoords?: { lat: number; lng: number; location?: string };
   tripStartedAt?: Date;
   tripEndedAt?: Date;
+  tollAmount?: number; // sum of eToll sheet entries matched to this trip (auto-synced)
   tripStats?: any; // cached Trakzee GPS travel summary (last fetched)
   tripStatsUpdatedAt?: Date;
   isSecret?: boolean;
@@ -132,6 +133,7 @@ const BookingSchema: Schema = new Schema(
     },
     tripStartedAt: { type: Date },
     tripEndedAt:   { type: Date },
+    tollAmount:    { type: Number, default: 0 }, // sum of matched eToll sheet entries (auto-synced)
     tripStats:          { type: Schema.Types.Mixed, default: null },
     tripStatsUpdatedAt: { type: Date },
     isSecret: { type: Boolean, default: false },

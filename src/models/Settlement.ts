@@ -22,9 +22,15 @@ export interface ISettlement extends Document {
     date: string;
   }>;
   financials: {
+    // Actual values entered/approved by the accountant
     cashAllocation: number;
     fuelTotal: number;
     councilLevy: number;
+    tollAmount: number; // NOT part of driver's allocation
+    // Route Master values at approval time — kept alongside actuals for comparison
+    assumeCashAllocation: number;
+    assumeCouncilLevy: number;
+    assumeTollAmount: number;
   };
   tollAmount?: number;
   status: string;
@@ -57,9 +63,15 @@ const SettlementSchema: Schema = new Schema(
       }
     ],
     financials: {
+      // actual values entered at approval
       cashAllocation: { type: Number, default: 0 },
       fuelTotal: { type: Number, default: 0 },
-      councilLevy: { type: Number, default: 0 }
+      councilLevy: { type: Number, default: 0 },
+      tollAmount: { type: Number, default: 0 }, // not part of driver's allocation
+      // Route Master values at approval time (for actual-vs-assumed comparison)
+      assumeCashAllocation: { type: Number, default: 0 },
+      assumeCouncilLevy: { type: Number, default: 0 },
+      assumeTollAmount: { type: Number, default: 0 }
     },
     tollAmount: { type: Number, default: 0 },
     status: { type: String, default: "Approved" }

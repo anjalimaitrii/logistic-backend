@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import Settlement from "../models/Settlement.js";
 import Booking from "../models/Booking.js";
-import { deductToll } from "./tollController.js";
 
 export const createOrUpdateSettlement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -26,23 +25,14 @@ export const createOrUpdateSettlement = async (req: Request, res: Response, next
 
     updateData.status = "Approved";
 
-    // Find existing settlement to calculate toll deduction delta
-    const existing = await Settlement.findOne({ bookingId });
-    const prevToll = existing?.tollAmount || 0;
-    const newToll = tollAmount !== undefined ? Number(tollAmount) : prevToll;
-    const tollDelta = newToll - prevToll;
-
     const settlement = await Settlement.findOneAndUpdate(
        { bookingId },
        { $set: updateData },
        { new: true, upsert: true }
      );
 
-    // Deduct toll from toll account if toll amount increased
-    if (tollDelta > 0) {
-      const booking = await Booking.findById(bookingId).select("tripId");
-      await deductToll(tollDelta, bookingId, booking?.tripId || bookingId.toString());
-    }
+    // NOTE: wallet deduction moved to the eToll sheet upload (tollController) —
+    // toll amounts come only from uploaded sheets now, settlements never deduct.
 
     // Update Journey Timeline in Booking
     if (financials && financials.cashAllocation) {
