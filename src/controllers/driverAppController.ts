@@ -3,6 +3,7 @@ import { AuthedRequest } from "../middleware/auth.js";
 import Driver from "../models/Driver.js";
 import Assignment from "../models/Assignment.js";
 import Booking from "../models/Booking.js";
+import Settlement from "../models/Settlement.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { fileCompletedBooking } from "../services/completionRecords.js";
@@ -11,34 +12,28 @@ import { getVehiclePosition } from "./liveTrackingController.js";
 // POST /api/driver-app/login
 export const loginDriver = async (req: AuthedRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { phone, password } = req.body;
+    const { email, password } = req.body;
 
-    if (!phone || !password) {
-      res.status(400).json({ message: "Phone and password are required" });
+    if (!email || !password) {
+      res.status(400).json({ message: "Email and password are required" });
       return;
     }
 
-    const driver = await Driver.findOne({ phone });
-    if (!driver) {
+    const driver = await Driver.findOne({ email });
+    if (!driver || !driver.password) {
+      // No email match, or a driver record that was never registered with credentials
       res.status(404).json({ message: "Driver not found" });
       return;
     }
 
-    let isMatch = false;
-    if (!driver.password) {
-      // Default fallback password for existing/unconfigured drivers
-      isMatch = password === "123456";
-    } else {
-      isMatch = await bcrypt.compare(password, driver.password);
-    }
-
+    const isMatch = await bcrypt.compare(password, driver.password);
     if (!isMatch) {
       res.status(401).json({ message: "Invalid credentials" });
       return;
     }
 
     const token = jwt.sign(
-      { id: driver._id, role: "driver", phone: driver.phone },
+      { id: driver._id, role: "driver", email: driver.email },
       process.env.JWT_SECRET || "fallback_secret",
       { expiresIn: "30d" }
     );
@@ -50,6 +45,7 @@ export const loginDriver = async (req: AuthedRequest, res: Response, next: NextF
         _id: driver._id,
         name: driver.name,
         phone: driver.phone,
+        email: driver.email,
         licenseNo: driver.licenseNo,
         driverStatus: driver.driverStatus
       }
@@ -86,8 +82,19 @@ export const getDriverTrips = async (req: AuthedRequest, res: Response, next: Ne
       })
       .lean();
 
-    const trips = assignments
+    // A trip reaches the driver only after the accountant approves it —
+    // approval = a Settlement doc with status "Approved" for that booking.
+    const bookingIds = assignments
       .filter((a) => a.bookingId)
+      .map((a) => (a.bookingId as any)._id);
+    const approvedSettlements = await Settlement.find({
+      bookingId: { $in: bookingIds },
+      status: "Approved"
+    }).select("bookingId").lean();
+    const approvedIds = new Set(approvedSettlements.map((s) => s.bookingId.toString()));
+
+    const trips = assignments
+      .filter((a) => a.bookingId && approvedIds.has((a.bookingId as any)._id.toString()))
       .map((a) => ({
         assignment: {
           _id: a._id,
