@@ -14,22 +14,21 @@ export const createDriver = async (req: Request, res: Response, next: NextFuncti
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Every driver logs in with this same fixed password; only email differs per driver.
+// Override via DRIVER_DEFAULT_PASSWORD in .env if this needs to change.
+const DEFAULT_DRIVER_PASSWORD = process.env.DRIVER_DEFAULT_PASSWORD || "Fleet@123";
 
 export const registerDriverCredentials = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { email, password } = req.body;
+    const { email } = req.body;
 
-    if (!email || !password) {
-      res.status(400).json({ message: "Email and password are required" });
+    if (!email) {
+      res.status(400).json({ message: "Email is required" });
       return;
     }
     if (!EMAIL_PATTERN.test(email)) {
       res.status(400).json({ message: "Invalid email format" });
-      return;
-    }
-    if (password.length < 6) {
-      res.status(400).json({ message: "Password must be at least 6 characters" });
       return;
     }
 
@@ -51,7 +50,7 @@ export const registerDriverCredentials = async (req: Request, res: Response, nex
     }
 
     driver.email = email;
-    driver.password = password;
+    driver.password = DEFAULT_DRIVER_PASSWORD;
     await driver.save();
 
     const driverResponse = driver.toObject();
