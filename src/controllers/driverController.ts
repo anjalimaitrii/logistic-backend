@@ -13,6 +13,56 @@ export const createDriver = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export const registerDriverCredentials = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      res.status(400).json({ message: "Email and password are required" });
+      return;
+    }
+    if (!EMAIL_PATTERN.test(email)) {
+      res.status(400).json({ message: "Invalid email format" });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ message: "Password must be at least 6 characters" });
+      return;
+    }
+
+    const driver = await Driver.findById(id);
+    if (!driver) {
+      res.status(404).json({ message: "Driver not found" });
+      return;
+    }
+
+    if (driver.email) {
+      res.status(400).json({ message: "Driver already registered" });
+      return;
+    }
+
+    const emailTaken = await Driver.findOne({ email, _id: { $ne: id } });
+    if (emailTaken) {
+      res.status(409).json({ message: "Email already in use" });
+      return;
+    }
+
+    driver.email = email;
+    driver.password = password;
+    await driver.save();
+
+    const driverResponse = driver.toObject();
+    delete (driverResponse as any).password;
+
+    res.status(200).json({ message: "Driver registered successfully", driver: driverResponse });
+  } catch (error: any) {
+    next(error);
+  }
+};
+
 export const getDrivers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const drivers = await Driver.find().populate("assignedTruck");
@@ -69,7 +119,8 @@ export const getDriverById = async (req: Request, res: Response, next: NextFunct
 
 export const updateDriver = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const driver = await Driver.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { password, email, ...safeUpdates } = req.body;
+    const driver = await Driver.findByIdAndUpdate(req.params.id, safeUpdates, { new: true });
     if (!driver) {
       res.status(404).json({ message: "Driver not found" });
       return;

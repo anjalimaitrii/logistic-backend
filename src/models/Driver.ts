@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 export interface IDriver {
   name: string;
   phone: string;
+  email?: string;
   licenseType: string;
   licenseNo: string;
   experience: number;
@@ -21,6 +22,7 @@ const DriverSchema: Schema = new Schema(
   {
     name: { type: String, required: true },
     phone: { type: String, required: true },
+    email: { type: String, unique: true, sparse: true },
     licenseType: { type: String, required: true },
     licenseNo: { type: String, required: true, unique: true },
     experience: { type: Number, default: 0 },
