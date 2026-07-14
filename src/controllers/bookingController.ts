@@ -4,6 +4,7 @@ import Client from "../models/Client.js";
 import Notification from "../models/Notification.js";
 import { getIo } from "../socket.js";
 import { fileCompletedBooking } from "../services/completionRecords.js";
+import { getFreshVehiclePosition } from "./liveTrackingController.js";
 
 export const createBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -236,13 +237,27 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
     if (deliveryOrders !== undefined) updateData.deliveryOrders = deliveryOrders;
     if (damages !== undefined) updateData.damages = damages;
     if (attachments !== undefined) updateData.attachments = attachments;
-    if (tripStatus === "started" && tripStartCoords) {
-      updateData.tripStartCoords = tripStartCoords;
+    // Capture the truck's position live from Trakzee at the exact moment of
+    // start/complete (falls back to whatever the client sent if the live
+    // fetch fails). Same source used by the driver app, so both match.
+    let liveTruckPos: { lat: number; lng: number; location?: string } | null = null;
+    if (tripStatus === "started" || tripStatus === "completed") {
+      const Assignment = (await import("../models/Assignment.js")).default;
+      const assignment = await Assignment.findOne({ bookingId: id });
+      if (assignment?.truckNumber) {
+        liveTruckPos = await getFreshVehiclePosition(assignment.truckNumber);
+      }
+    }
+
+    if (tripStatus === "started") {
+      const startCoords = liveTruckPos || tripStartCoords;
+      if (startCoords) updateData.tripStartCoords = startCoords;
       updateData.tripStartedAt = new Date();
     }
     if (tripStatus === "completed") {
       updateData.tripEndedAt = new Date();
-      if (tripEndCoords) updateData.tripEndCoords = tripEndCoords;
+      const endCoords = liveTruckPos || tripEndCoords;
+      if (endCoords) updateData.tripEndCoords = endCoords;
     }
     if (finalAmount !== undefined) updateData.finalAmount = finalAmount;
     if (advancePaid !== undefined) updateData.advancePaid = advancePaid;

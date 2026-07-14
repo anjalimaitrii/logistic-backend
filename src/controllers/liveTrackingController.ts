@@ -156,6 +156,64 @@ export async function getVehiclePosition(
   return null;
 }
 
+// Fetches the truck's position straight from Trakzee at call time (no cache),
+// for accurate point-in-time capture at trip start / complete. Refreshes the
+// shared caches on success, and falls back to the cached position if the live
+// fetch fails, so a capture never returns nothing when data exists.
+export async function getFreshVehiclePosition(
+  truckNumber: string
+): Promise<{ lat: number; lng: number; location?: string } | null> {
+  if (!truckNumber) return null;
+  try {
+    const token = await getToken();
+    const [officialNames, allVehicles] = await Promise.all([
+      getOfficialVehicleNames(token),
+      fetchVehicleData(token),
+    ]);
+    let vehicles: any[] =
+      officialNames.size > 0
+        ? allVehicles.filter((v: any) => officialNames.has(v.Vehicle_Name))
+        : allVehicles;
+
+    // Retry once with a fresh token if the list came back empty.
+    if (vehicles.length === 0 && cachedToken) {
+      officialVehicleNames = null;
+      const freshToken = await getToken(true);
+      const [freshNames, freshAll] = await Promise.all([
+        getOfficialVehicleNames(freshToken),
+        fetchVehicleData(freshToken),
+      ]);
+      vehicles =
+        freshNames.size > 0
+          ? freshAll.filter((v: any) => freshNames.has(v.Vehicle_Name))
+          : freshAll;
+    }
+
+    if (vehicles.length > 0) {
+      // Keep the shared caches current so the live map benefits too.
+      cachedLiveData = { success: true, vehicles, count: vehicles.length, source: "trakzee" };
+      liveDataExpiry = Date.now() + 10 * 1000;
+      LiveTrackingCache.create({ vehicles, source: "trakzee" }).catch(() => {});
+
+      const norm = String(truckNumber).trim().toUpperCase();
+      const v = vehicles.find(
+        (x: any) =>
+          String(x.Vehicle_No || "").trim().toUpperCase() === norm ||
+          String(x.Vehicle_Name || "").trim().toUpperCase() === norm
+      );
+      const lat = parseFloat(v?.Latitude);
+      const lng = parseFloat(v?.Longitude);
+      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+        return { lat, lng, location: v?.Location || undefined };
+      }
+    }
+  } catch (err: any) {
+    console.warn("[LiveTrack] getFreshVehiclePosition failed, using cache:", err?.message);
+  }
+  // Live fetch failed or truck not found live — fall back to cached position.
+  return getVehiclePosition(truckNumber);
+}
+
 export const getLiveVehicles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   console.log("[LiveTrack] GET /api/livetrack called");
   try {

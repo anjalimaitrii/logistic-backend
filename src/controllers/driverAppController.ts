@@ -7,7 +7,7 @@ import Settlement from "../models/Settlement.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { fileCompletedBooking } from "../services/completionRecords.js";
-import { getVehiclePosition } from "./liveTrackingController.js";
+import { getFreshVehiclePosition } from "./liveTrackingController.js";
 
 // POST /api/driver-app/login
 export const loginDriver = async (req: AuthedRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -134,7 +134,7 @@ export const updateDriverTripStatus = async (req: AuthedRequest, res: Response, 
       updateData.tripStartedAt = new Date();
       let startCoords = tripStartCoords;
       if (truckNumber) {
-        const trakzeeCoords = await getVehiclePosition(truckNumber);
+        const trakzeeCoords = await getFreshVehiclePosition(truckNumber);
         if (trakzeeCoords) {
           startCoords = trakzeeCoords;
         }
@@ -148,7 +148,7 @@ export const updateDriverTripStatus = async (req: AuthedRequest, res: Response, 
       updateData.tripEndedAt = new Date();
       let endCoords = tripEndCoords;
       if (truckNumber) {
-        const trakzeeCoords = await getVehiclePosition(truckNumber);
+        const trakzeeCoords = await getFreshVehiclePosition(truckNumber);
         if (trakzeeCoords) {
           endCoords = trakzeeCoords;
         }
