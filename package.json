@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "npm install && tsc",
+    "build": "npm install && node node_modules/typescript/bin/tsc",
     "start": "node dist/server.js"
   },
   "repository": {
