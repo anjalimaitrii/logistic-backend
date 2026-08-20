@@ -61,6 +61,14 @@ export const updateTruck = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
+    // The tyre list is the truth; the flat position array is derived from it so
+    // anything still reading the old field sees the same set of positions.
+    if (Array.isArray(updateData.tyres)) {
+      updateData.tireSerialNumber = updateData.tyres
+        .map((t: any) => String(t?.position || "").trim())
+        .filter(Boolean);
+    }
+
     const update: any = { ...updateData };
     if (activityEntries.length) update.$push = { activityLog: { $each: activityEntries } };
 

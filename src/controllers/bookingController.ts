@@ -278,10 +278,23 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
     
     // Skip 'finalized' as it's usually logged separately as 'Trip Approved'
     if (displayStatus && displayStatus.toLowerCase() !== "finalized") {
+      // "Trip status updated to returning" says nothing a reader could not see
+      // from the status chip. Where the truck is headed is the part worth keeping,
+      // and for a return that also explains the empty leg the accountant is about
+      // to cost.
+      const warehouse = displayStatus.toLowerCase() === "returning"
+        ? await (await import("../models/Warehouse.js")).default.findOne().select("city").lean()
+        : null;
+
+      const description =
+        displayStatus.toLowerCase() === "returning"
+          ? `Cargo delivered — running empty back to the yard${warehouse?.city ? ` at ${warehouse.city}` : ""}. The return distance is entered on the settlement.`
+          : `Trip status updated to ${displayStatus}`;
+
       timelineUpdate.$push = {
         timeline: {
           title: displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1),
-          description: `Trip status updated to ${displayStatus}`,
+          description,
           time: new Date(),
           status: "completed"
         }

@@ -5,6 +5,9 @@ import Driver from "../models/Driver.js";
 import TruckInspection from "../models/TruckInspection.js";
 import { retargetRunningTrip, promoteNextForDriver } from "../services/tripContinuity.js";
 import { ASSIGNABLE_STATUSES } from "../lib/tripStatus.js";
+import { normalizeTyres, worstTyreCondition, joinTyreNumbers } from "../lib/tyreInspection.js";
+import { mergeFittedTyres, fittedTyresChanged } from "../lib/fittedTyres.js";
+import Truck from "../models/Truck.js";
 
 export const createAssignment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -296,23 +299,62 @@ export const getPendingInspections = async (req: Request, res: Response, next: N
 // Mark truck as inspected → save to TruckInspection history + driver becomes available.
 export const markTruckInspected = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { driverId } = req.params;
-  const { bookingId, vehicleCondition, tyreCondition, tyreNumber, challans, notes } = req.body;
+  const { bookingId, vehicleCondition, tyreCondition, tyreNumber, tyres, challans, notes } = req.body;
   try {
     const driver = await Driver.findById(driverId);
+
+    // Accepts the tyre list or a legacy flat pair, whichever the client sent.
+    const inspectedTyres = normalizeTyres({ tyres, tyreNumber, tyreCondition });
+
+    // The truck that ran THIS trip, not whatever the driver is currently assigned
+    // to. Those differ the moment a driver is moved onto another vehicle, and the
+    // tyre serials below are written to whichever this resolves to — stamping
+    // them on the wrong truck is worse than not stamping them at all.
+    const tripAssignment = bookingId
+      ? await Assignment.findOne({ bookingId }).select("truckId").lean()
+      : null;
+    const inspectedTruckId = tripAssignment?.truckId || driver?.assignedTruck || null;
 
     // Save inspection record for the current (just-completed) trip
     const inspection = new TruckInspection({
       driverId,
-      truckId:          driver?.assignedTruck || null,
+      truckId:          inspectedTruckId,
       bookingId:        bookingId || null,
       vehicleCondition: vehicleCondition || "Good",
-      tyreCondition:    tyreCondition || "Good",
-      tyreNumber:       tyreNumber || "",
+      tyres:            inspectedTyres,
+      // Kept in step with the list so nothing reading the old flat pair breaks.
+      tyreCondition:    worstTyreCondition(inspectedTyres, tyreCondition || "Good"),
+      tyreNumber:       joinTyreNumbers(inspectedTyres) || tyreNumber || "",
       challans:         challans || "",
       notes:            notes || "",
       inspectedAt:      new Date(),
     });
     await inspection.save();
+
+    // The inspection is the more recent look at the truck, so a serial corrected
+    // at the gate has to reach the compliance record too — otherwise the two
+    // screens disagree about which tyre is on which wheel. Additive: wheels this
+    // inspection never mentioned are left exactly as they were.
+    const truckId = inspectedTruckId;
+    if (truckId && inspectedTyres.some((t) => t.position)) {
+      try {
+        const truck = await Truck.findById(truckId).select("tyres").lean();
+        const merged = mergeFittedTyres(truck?.tyres as any, inspectedTyres);
+        if (fittedTyresChanged(truck?.tyres as any, merged)) {
+          await Truck.findByIdAndUpdate(truckId, {
+            $set: {
+              tyres: merged,
+              // Positions only — the flat field older readers still use.
+              tireSerialNumber: merged.map((t) => t.position).filter(Boolean),
+            },
+          });
+        }
+      } catch (err) {
+        // The inspection itself is already saved; a stale compliance record is
+        // worth a log, not a failed completion.
+        console.error("[Inspection] Could not sync fitted tyres to the truck:", err);
+      }
+    }
 
     // Reset driver to available. tripQueue is NOT cleared here: the ops
     // completion modal calls this BEFORE marking the trip completed, so wiping

@@ -4,6 +4,8 @@ import Booking from "../models/Booking.js";
 import TripGap from "../models/TripGap.js";
 import { isApprovalWrite } from "../lib/settlementStatus.js";
 import { computeLegTotals } from "../lib/legTotals.js";
+import { diffFinancials, diffEmptyLegs, describeSettlementChange } from "../lib/settlementDiff.js";
+import { factsFromLeg, factsToUpdate } from "../lib/gapFacts.js";
 
 export const createOrUpdateSettlement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -36,6 +38,10 @@ export const createOrUpdateSettlement = async (req: Request, res: Response, next
       }
     }
 
+    // The state before this write, read once: the timeline needs it to say what a
+    // figure moved FROM, and the fuel totals need its stored empty legs.
+    const prior: any = await Settlement.findOne({ bookingId }).lean();
+
     const updateData: any = {};
     if (expenses) updateData.expenses = expenses;
     if (financials) updateData.financials = financials;
@@ -50,9 +56,7 @@ export const createOrUpdateSettlement = async (req: Request, res: Response, next
       // Journey totals must span the empty legs too, or every consumer of
       // totalDistance under-reports the truck's real distance. An approve that
       // resends fuelDetails but not extraLegs still has to count the stored ones.
-      const effectiveExtras = incomingExtraLegs
-        ?? (await Settlement.findOne({ bookingId }).select("extraLegs").lean())?.extraLegs
-        ?? [];
+      const effectiveExtras = incomingExtraLegs ?? prior?.extraLegs ?? [];
       const { totalDistance, totalLiters } = computeLegTotals(legs, effectiveExtras);
       updateData.fuelDetails = {
         legs,
@@ -80,17 +84,43 @@ export const createOrUpdateSettlement = async (req: Request, res: Response, next
     // NOTE: wallet deduction moved to the eToll sheet upload (tollController) —
     // toll amounts come only from uploaded sheets now, settlements never deduct.
 
-    // Update Journey Timeline in Booking
-    if (financials && financials.cashAllocation) {
+    // Whichever screen the accountant filled in, the empty leg's endpoints and
+    // distance belong to the GAP — one truck, one drive, the same figures on both
+    // trips. Without this the other trip's screen asked for the numbers that had
+    // just been entered next door.
+    if (Array.isArray(incomingExtraLegs)) {
+      for (const leg of incomingExtraLegs) {
+        if (!leg?.gapId) continue;
+        const facts = factsFromLeg(leg);
+        if (!facts) continue;
+        try {
+          await TripGap.updateOne({ _id: leg.gapId }, { $set: factsToUpdate(facts) });
+        } catch (err) {
+          // The settlement is already saved; a stale gap is worth a log, not a 500.
+          console.error("[Settlement] Could not sync empty-leg facts to the gap:", err);
+        }
+      }
+    }
+
+    // Journey timeline: every figure that moved, named with its old and new value.
+    // A save that changed nothing writes nothing — re-approving an unchanged
+    // settlement used to leave a duplicate line each time.
+    const entry = describeSettlementChange(
+      diffFinancials(prior?.financials, financials),
+      diffEmptyLegs(prior?.extraLegs, incomingExtraLegs),
+      isApproval && prior?.status !== "Approved"
+    );
+
+    if (entry) {
       await Booking.findByIdAndUpdate(bookingId, {
         $push: {
           timeline: {
-            title: "Trip Approved",
-            description: `Accountant approved trip with ₦${Number(financials.cashAllocation).toLocaleString()} cash allocation`,
+            title: entry.title,
+            description: entry.description,
             time: new Date(),
-            status: "completed"
-          }
-        }
+            status: "completed",
+          },
+        },
       });
     }
 

@@ -21,6 +21,17 @@ export interface ITripGap extends Document {
    *   knows that, so the UI leaves the origin blank for them to fill.
    */
   detectedDuring?: "offloading" | "returning";
+  /**
+   * The distance the truck actually covered, and whether a human has confirmed
+   * where the run began.
+   *
+   * These are facts about the truck, not about who pays for it — so they live on
+   * the gap and both adjacent trips read the same numbers. Before this they were
+   * only ever written into one trip's settlement, and the other trip's screen
+   * asked the accountant for the very figures they had just entered next door.
+   */
+  km?: number;
+  originConfirmed?: boolean;
   status: "unattributed" | "claimed";
   claimedByBookingId?: mongoose.Types.ObjectId;
   claimedSide?: "append" | "prepend";
@@ -39,6 +50,8 @@ const TripGapSchema = new Schema<ITripGap>(
     toLabel:       { type: String, default: "" },
     detectedAt:    { type: Date, default: Date.now },
     detectedDuring: { type: String, enum: ["offloading", "returning"] },
+    km:            { type: Number },
+    originConfirmed: { type: Boolean, default: false },
     status:        { type: String, enum: ["unattributed", "claimed"], default: "unattributed" },
     claimedByBookingId: { type: Schema.Types.ObjectId, ref: "Booking" },
     claimedSide:   { type: String, enum: ["append", "prepend"] },

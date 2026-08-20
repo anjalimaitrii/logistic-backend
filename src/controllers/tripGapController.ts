@@ -29,7 +29,7 @@ export const getGapsForBooking = async (req: Request, res: Response, next: NextF
 export const claimGap = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { bookingId, side, km, claimedBy } = req.body;
+    const { bookingId, side, km, fromLabel, toLabel, claimedBy } = req.body;
 
     if (!bookingId || !side) {
       res.status(400).json({ message: "bookingId and side are required" });
@@ -59,6 +59,13 @@ export const claimGap = async (req: Request, res: Response, next: NextFunction):
           claimedKm: Number(km) || 0,
           claimedAt: new Date(),
           claimedBy: claimedBy || "",
+          // Endpoints and distance belong to the gap, not to the claim: the other
+          // trip's screen reads them straight back rather than asking again.
+          ...(Number(km) > 0 ? { km: Number(km) } : {}),
+          ...(String(fromLabel || "").trim()
+            ? { fromLabel: String(fromLabel).trim(), originConfirmed: true }
+            : {}),
+          ...(String(toLabel || "").trim() ? { toLabel: String(toLabel).trim() } : {}),
         },
       },
       { new: true }

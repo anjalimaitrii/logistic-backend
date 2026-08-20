@@ -23,6 +23,11 @@ export interface ITruck {
   }[];
   fastagBalance: string;
   tireNumbers: string;
+  // Each fitted tyre: where it sits on the truck and the serial stamped on it.
+  // A position on its own cannot answer "which tyre failed" — that is the serial.
+  tyres: { position: string; serial: string }[];
+  // Positions only, derived from `tyres`. Kept because records written before the
+  // serials existed hold their positions here.
   tireSerialNumber: string[];
   nextServiceKm: string;
   estNextServiceDate: string;
@@ -79,6 +84,14 @@ const TruckSchema: Schema = new Schema(
     },
     fastagBalance: { type: String, default: "0" },
     tireNumbers: { type: String },
+    tyres: {
+      type: [{
+        position: { type: String, default: "" },
+        serial:   { type: String, default: "" },
+        _id: false,
+      }],
+      default: [],
+    },
     tireSerialNumber: { type: [String], default: [] },
     nextServiceKm: { type: String },
     estNextServiceDate: { type: String },
