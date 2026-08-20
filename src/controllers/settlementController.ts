@@ -1,35 +1,81 @@
 import { Request, Response, NextFunction } from "express";
 import Settlement from "../models/Settlement.js";
 import Booking from "../models/Booking.js";
+import TripGap from "../models/TripGap.js";
+import { isApprovalWrite } from "../lib/settlementStatus.js";
+import { computeLegTotals } from "../lib/legTotals.js";
 
 export const createOrUpdateSettlement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { bookingId, fuelDetails, expenses, financials, tollAmount } = req.body;
+    const { bookingId, fuelDetails, expenses, financials, tollAmount, extraLegs, returnLegDismissed } = req.body;
+
+    // Only a genuine approval (one carrying financials) may set the status, and
+    // only an approval may bring a settlement into existence. Expense syncs from
+    // the jobs screen post to this same endpoint; letting them stamp "Approved"
+    // is what unlocked unapproved trips in the driver app.
+    const isApproval = isApprovalWrite(req.body);
+
+    // CR-VL-001 §9: a trip cannot be approved while an empty leg leading INTO it
+    // is unattributed. Only approvals are gated — an expense sync carries no
+    // financials, so it passes through and never 409s.
+    if (isApproval) {
+      const blocking = await TripGap.findOne({
+        nextBookingId: bookingId,
+        status: "unattributed",
+      })
+        .populate("prevBookingId", "tripId")
+        .lean();
+
+      if (blocking) {
+        const prevLabel = (blocking.prevBookingId as any)?.tripId || "the previous trip";
+        res.status(409).json({
+          message: `Empty leg ${blocking.fromLabel} → ${blocking.toLabel} is unattributed. Assign it to this trip or to ${prevLabel} before approving.`,
+          gap: blocking,
+        });
+        return;
+      }
+    }
 
     const updateData: any = {};
     if (expenses) updateData.expenses = expenses;
     if (financials) updateData.financials = financials;
     if (tollAmount !== undefined) updateData.tollAmount = Number(tollAmount);
 
+    const incomingExtraLegs = Array.isArray(extraLegs) ? extraLegs : undefined;
+    if (incomingExtraLegs) updateData.extraLegs = incomingExtraLegs;
+    if (returnLegDismissed !== undefined) updateData.returnLegDismissed = !!returnLegDismissed;
+
     if (fuelDetails) {
       const legs = Array.isArray(fuelDetails.legs) ? fuelDetails.legs : [];
-      const totalDistance = legs.reduce((sum: number, leg: any) => sum + (Number(leg.km) || 0), 0);
-      const totalLiters = legs.reduce((sum: number, leg: any) => sum + (Number(leg.liters) || 0), 0);
+      // Journey totals must span the empty legs too, or every consumer of
+      // totalDistance under-reports the truck's real distance. An approve that
+      // resends fuelDetails but not extraLegs still has to count the stored ones.
+      const effectiveExtras = incomingExtraLegs
+        ?? (await Settlement.findOne({ bookingId }).select("extraLegs").lean())?.extraLegs
+        ?? [];
+      const { totalDistance, totalLiters } = computeLegTotals(legs, effectiveExtras);
       updateData.fuelDetails = {
         legs,
         fuelRate: fuelDetails.fuelRate,
-        totalDistance: Math.round(totalDistance),
-        totalLiters: Math.round(totalLiters * 10) / 10
+        totalDistance,
+        totalLiters,
       };
     }
 
-    updateData.status = "Approved";
+    if (isApproval) {
+      updateData.status = "Approved";
+    }
 
     const settlement = await Settlement.findOneAndUpdate(
        { bookingId },
        { $set: updateData },
-       { new: true, upsert: true }
+       { new: true, upsert: isApproval }
      );
+
+    if (!settlement) {
+      res.status(404).json({ message: "No settlement to update for this booking" });
+      return;
+    }
 
     // NOTE: wallet deduction moved to the eToll sheet upload (tollController) —
     // toll amounts come only from uploaded sheets now, settlements never deduct.

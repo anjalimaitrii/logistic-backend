@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { fileCompletedBooking } from "../services/completionRecords.js";
 import { getFreshVehiclePosition } from "./liveTrackingController.js";
+import { isFinalLeg } from "../lib/tripStatus.js";
 
 // POST /api/driver-app/login
 export const loginDriver = async (req: AuthedRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -180,6 +181,13 @@ export const updateDriverTripStatus = async (req: AuthedRequest, res: Response, 
       return;
     }
 
+    // Starting closes the previous trip (the truck reached its last point — this
+    // trip's pickup) and promotes this one if it was still queued.
+    if (tripStatus.toLowerCase() === "started") {
+      const { onTripStarted } = await import("../services/tripContinuity.js");
+      await onTripStarted(String(bookingId));
+    }
+
     // Offloading logic: driver becomes assignable for a new trip (assigning one
     // auto-completes this trip with the truck's current position as end point,
     // same as the returning flow)
@@ -193,11 +201,13 @@ export const updateDriverTripStatus = async (req: AuthedRequest, res: Response, 
     }
 
     // Returning logic: update driver status to 'returning'
-    if (tripStatus.toLowerCase() === "returning") {
+    // Final unladen leg — to the yard ("returning") or to the next job's pickup
+    // ("repositioning"). The driver status mirrors whichever it is.
+    if (isFinalLeg(tripStatus)) {
       const assignment = await Assignment.findOne({ bookingId });
       if (assignment?.driverId) {
         await Driver.findByIdAndUpdate(assignment.driverId, {
-          driverStatus: "returning"
+          driverStatus: tripStatus.toLowerCase()
         });
       }
     }
@@ -206,27 +216,12 @@ export const updateDriverTripStatus = async (req: AuthedRequest, res: Response, 
     if (tripStatus.toLowerCase() === "completed") {
       const assignment = await Assignment.findOne({ bookingId });
       if (assignment?.driverId) {
-        const dId = assignment.driverId.toString();
         await Assignment.findByIdAndUpdate(assignment._id, { queueStatus: "completed" });
-
-        const nextAssignment = await Assignment.findOne({
-          driverId: dId,
-          queueStatus: "queued"
-        }).sort({ sequence: 1 });
-
-        if (nextAssignment) {
-          await Assignment.findByIdAndUpdate(nextAssignment._id, { queueStatus: "active" });
-          await Driver.findByIdAndUpdate(dId, {
-            $set: { driverStatus: "on_trip" },
-            $pull: { tripQueue: nextAssignment.bookingId }
-          });
-        } else {
-          await Driver.findByIdAndUpdate(dId, {
-            driverStatus: "available",
-            needsTruckInspection: false,
-            tripQueue: []
-          });
-        }
+        // One shared helper for both completion paths (ops and driver app). It
+        // refuses to activate a trip the accountant has not approved, so the
+        // driver never holds an active assignment their app cannot show.
+        const { promoteNextForDriver } = await import("../services/tripContinuity.js");
+        await promoteNextForDriver(assignment.driverId.toString());
       }
 
       // File Completed booking into Invoice or Cash

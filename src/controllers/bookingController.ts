@@ -5,6 +5,7 @@ import Notification from "../models/Notification.js";
 import { getIo } from "../socket.js";
 import { fileCompletedBooking } from "../services/completionRecords.js";
 import { getFreshVehiclePosition } from "./liveTrackingController.js";
+import { isFinalLeg } from "../lib/tripStatus.js";
 
 export const createBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -218,8 +219,15 @@ export const cancelBooking = async (req: Request, res: Response, next: NextFunct
     // Remove the booking and everything tied to it
     const Assignment = (await import("../models/Assignment.js")).default;
     const Settlement = (await import("../models/Settlement.js")).default;
+    const TripGap = (await import("../models/TripGap.js")).default;
+    const Driver = (await import("../models/Driver.js")).default;
     await Assignment.deleteMany({ bookingId: id });
     await Settlement.deleteMany({ bookingId: id });
+    // A gap references two bookings. Deleting one of them would leave a gap that
+    // can never be claimed — the claim is atomic and one-shot, so there is no
+    // repair path — and would block the surviving trip's approval forever.
+    await TripGap.deleteMany({ $or: [{ prevBookingId: id }, { nextBookingId: id }] });
+    await Driver.updateMany({ tripQueue: id } as any, { $pull: { tripQueue: id } } as any);
     await Booking.findByIdAndDelete(id);
 
     res.json({ message: "Booking cancelled and removed" });
@@ -291,8 +299,23 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
       return;
     }
 
+    // Starting this trip closes the previous one — the truck reaching this
+    // pickup is exactly the condition the previous trip was waiting on — and
+    // promotes this trip if it was still queued.
+    if (tripStatus === "started") {
+      try {
+        const { onTripStarted } = await import("../services/tripContinuity.js");
+        await onTripStarted(String(id));
+      } catch (err) {
+        console.error("[Booking] Trip-start continuity failed:", err);
+        throw err;
+      }
+    }
+
     // When driver marks offloading/returning → update their driverStatus so they appear available for queueing
-    if (tripStatus === "offloading" || tripStatus === "returning") {
+    // repositioning counts here too: the driver is on their final unladen leg,
+    // just aimed at the next job's pickup rather than the yard.
+    if (tripStatus === "offloading" || isFinalLeg(tripStatus)) {
       try {
         const Assignment = (await import("../models/Assignment.js")).default;
         const Driver = (await import("../models/Driver.js")).default;
@@ -316,34 +339,15 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
 
         const assignment = await Assignment.findOne({ bookingId: id });
         if (assignment?.driverId) {
-          const driverId = assignment.driverId.toString();
-
           await Assignment.findByIdAndUpdate(assignment._id, { queueStatus: "completed" });
-
-          const nextAssignment = await Assignment.findOne({
-            driverId,
-            queueStatus: "queued"
-          }).sort({ sequence: 1 });
-
-          if (nextAssignment) {
-            await Assignment.findByIdAndUpdate(nextAssignment._id, { queueStatus: "active" });
-            await Driver.findByIdAndUpdate(driverId, {
-              $set: { driverStatus: "on_trip" },
-              $pull: { tripQueue: nextAssignment.bookingId }
-            });
-          } else {
-            // No more queued trips — the driver is free. The completion modal
-            // already captured the truck inspection, so they go straight to
-            // "available" instead of being sent back to "returning".
-            await Driver.findByIdAndUpdate(driverId, {
-              driverStatus: "available",
-              needsTruckInspection: false,
-              tripQueue: []
-            });
-          }
+          const { promoteNextForDriver } = await import("../services/tripContinuity.js");
+          await promoteNextForDriver(assignment.driverId.toString());
         }
       } catch (promoteErr) {
-        console.error("Auto-promote failed (non-critical):", promoteErr);
+        // NOT swallowed. Promotion is now the only mechanism that ever starts a
+        // queued trip; a silent failure strands it forever with nothing to retry it.
+        console.error("Auto-promote failed:", promoteErr);
+        throw promoteErr;
       }
 
       // File the completed trip: with tax → Invoice (inv-xxx), without → Cash (cash-xxx)
@@ -456,23 +460,11 @@ export const changeDropoffAddress = async (req: Request, res: Response, next: Ne
       { new: true }
     );
 
-    // Update Settlement pickupKm and dropoffKm if financials provided
-    if (financials?.newPickupKm !== undefined || financials?.newDropoffKm !== undefined) {
-      const Settlement = (await import("../models/Settlement.js")).default;
-      const totalDist = (Number(financials?.newPickupKm) || 0) + (Number(financials?.newDropoffKm) || 0);
-
-      await Settlement.findOneAndUpdate(
-        { bookingId: id },
-        {
-          $set: {
-            "fuelDetails.pickupKm": Number(financials?.newPickupKm) || 0,
-            "fuelDetails.dropoffKm": Number(financials?.newDropoffKm) || 0,
-            "fuelDetails.totalDistance": totalDist
-          }
-        },
-        { upsert: true }
-      );
-    }
+    // NOTE: this endpoint used to upsert a Settlement carrying pickupKm/dropoffKm.
+    // That model assumed every trip has exactly two distances — already wrong for
+    // multi-stop trips — it clobbered fuelDetails.totalDistance, and because it
+    // upserted it manufactured an "Approved" settlement on a trip nobody had
+    // approved. Distances belong to the accountant's leg model now (CR-VL-001).
 
     res.status(200).json({
       message: "Job addresses updated successfully",

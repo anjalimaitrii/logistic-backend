@@ -10,7 +10,9 @@ export interface IDriver {
   experience: number;
   assignedTruck?: mongoose.Types.ObjectId;
   status: string; // Active, On Leave, Suspended
-  driverStatus: string; // available, on_trip, offloading, returning, under_inspection
+  driverStatus: string; // available, on_trip, offloading, returning, repositioning, under_inspection
+  // repositioning = still on the current trip, driving empty to the NEXT job's
+  // pickup after a reassignment. Not assignable.
   tripQueue: mongoose.Types.ObjectId[];
   needsTruckInspection: boolean;
   password?: string;
@@ -28,7 +30,9 @@ const DriverSchema: Schema = new Schema(
     experience: { type: Number, default: 0 },
     assignedTruck: { type: Schema.Types.ObjectId, ref: "Truck" },
     status: { type: String, default: "Active" },
-    driverStatus: { type: String, default: "available" }, // available, on_trip, offloading, returning, under_inspection
+    driverStatus: { type: String, default: "available" }, // available, on_trip, offloading, returning, repositioning, under_inspection
+  // repositioning = still on the current trip, driving empty to the NEXT job's
+  // pickup after a reassignment. Not assignable.
     tripQueue: [{ type: Schema.Types.ObjectId, ref: "Booking" }],
     needsTruckInspection: { type: Boolean, default: false },
     password: { type: String },

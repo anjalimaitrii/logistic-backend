@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import Driver from "../models/Driver.js";
 import Assignment from "../models/Assignment.js";
 import Booking from "../models/Booking.js";
+import { isFinalLeg } from "../lib/tripStatus.js";
 
 export const createDriver = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -81,18 +82,40 @@ export const getDrivers = async (req: Request, res: Response, next: NextFunction
         const booking = assignment.bookingId as any;
         const ts = booking?.tripStatus?.toLowerCase();
         const d = drivers.find(dr => dr._id.toString() === assignment.driverId?.toString());
+
+        // A driver repositioning to the next job's pickup is mid-trip by design.
+        // Re-deriving their status from tripStatus would stamp them back to
+        // "returning" on every admin page load and make them assignable again.
+        if (d?.driverStatus === "repositioning") continue;
+
+        // A driver with a queued trip is not free. Freeing them here would leave
+        // that queued assignment with nothing left to promote it — nothing polls
+        // for queued assignments.
+        const queuedCount = await Assignment.countDocuments({
+          driverId: assignment.driverId,
+          queueStatus: "queued",
+        });
+
         if (ts === "offloading" && d?.driverStatus !== "offloading") {
           await Driver.updateOne({ _id: assignment.driverId }, { driverStatus: "offloading" });
           if (d) (d as any).driverStatus = "offloading";
-        } else if (ts === "returning") {
-          await Driver.updateOne({ _id: assignment.driverId }, { driverStatus: "returning" });
-          if (d) (d as any).driverStatus = "returning";
-        } else if (ts === "completed" || ts === "delivered") {
-          // Trip finished → driver is free. Don't leave them stuck as "returning".
+        } else if (isFinalLeg(ts)) {
+          await Driver.updateOne({ _id: assignment.driverId }, { driverStatus: ts });
+          if (d) (d as any).driverStatus = ts;
+        } else if ((ts === "completed" || ts === "delivered") && queuedCount === 0) {
+          // Trip finished and nothing queued → driver is free.
           await Driver.updateOne({ _id: assignment.driverId },
             { driverStatus: "available", needsTruckInspection: false, tripQueue: [] });
           await Assignment.updateOne({ _id: assignment._id }, { queueStatus: "completed" });
           if (d) (d as any).driverStatus = "available";
+        } else if ((ts === "completed" || ts === "delivered") && queuedCount > 0) {
+          // Trip finished with a queued successor → hand off to the one helper
+          // that knows whether the next trip may start yet.
+          await Assignment.updateOne({ _id: assignment._id }, { queueStatus: "completed" });
+          const { promoteNextForDriver } = await import("../services/tripContinuity.js");
+          await promoteNextForDriver(String(assignment.driverId));
+          const refreshed = await Driver.findById(assignment.driverId).select("driverStatus").lean();
+          if (d && refreshed) (d as any).driverStatus = refreshed.driverStatus;
         }
       }
     }

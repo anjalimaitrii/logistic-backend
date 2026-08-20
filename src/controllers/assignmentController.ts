@@ -3,43 +3,14 @@ import Assignment from "../models/Assignment.js";
 import Booking from "../models/Booking.js";
 import Driver from "../models/Driver.js";
 import TruckInspection from "../models/TruckInspection.js";
-import { getVehiclePosition } from "./liveTrackingController.js";
-import { fileCompletedBooking } from "../services/completionRecords.js";
-
-// Internal helper: promote next queued trip for a driver, or set to returning
-const promoteOrReturnDriver = async (driverId: string) => {
-  const nextAssignment = await Assignment.findOne({
-    driverId,
-    queueStatus: "queued"
-  }).sort({ sequence: 1 });
-
-  if (nextAssignment) {
-    await Assignment.findByIdAndUpdate(nextAssignment._id, { queueStatus: "active" });
-    await Driver.findByIdAndUpdate(driverId, {
-      $set: { driverStatus: "on_trip" },
-      $pull: { tripQueue: nextAssignment.bookingId }
-    });
-    await Booking.findByIdAndUpdate(nextAssignment.bookingId, {
-      $push: {
-        timeline: {
-          title: "Trip Activated",
-          description: "Next queued trip is now active for this driver",
-          time: new Date(),
-          status: "completed"
-        }
-      }
-    });
-  } else {
-    await Driver.findByIdAndUpdate(driverId, {
-      driverStatus: "returning",
-      needsTruckInspection: true
-    });
-  }
-};
+import { retargetRunningTrip, promoteNextForDriver } from "../services/tripContinuity.js";
+import { ASSIGNABLE_STATUSES } from "../lib/tripStatus.js";
 
 export const createAssignment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { bookingId, truckId, driverId, driverName, truckNumber, truckHealth, collectionArea, returningEndCoords } = req.body;
+    // No returningEndCoords: this flow no longer freezes a GPS end point, because
+    // it no longer ends the running trip (CR-VL-001 §3, and no GPS is used at all).
+    const { bookingId, truckId, driverId, driverName, truckNumber, truckHealth, collectionArea } = req.body;
 
     const existing = await Assignment.findOne({ bookingId });
     if (existing) {
@@ -55,86 +26,67 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
 
     let queueStatus = "active";
     let sequence = 1;
+    // Set when the previous trip closed on the spot because this job starts at
+    // the same point — the queued trip is then eligible to start right away.
+    let closedOnAssign = false;
 
-    if (driver.driverStatus === "on_trip" || driver.driverStatus === "offloading" || driver.driverStatus === "returning") {
+    if (
+      driver.driverStatus === "on_trip" ||
+      driver.driverStatus === "offloading" ||
+      driver.driverStatus === "returning" ||
+      driver.driverStatus === "repositioning"
+    ) {
       if (driver.driverStatus === "returning" || driver.driverStatus === "offloading") {
-        try {
-          // Find all assignments for this driver and get the one whose booking is on its
-          // final leg (offloading or returning) — both mean the driver is assignable.
-          const driverAssignments = await Assignment.find({ driverId }).select("bookingId").lean();
-          const allBookingIds = driverAssignments.map((a: any) => a.bookingId);
+        // CR-VL-001 §3: do NOT complete the running trip. Retarget it to end at
+        // this new job's pickup, and queue the new job behind it. The empty
+        // distance in between is what the accountant then bills.
 
-          const currentLegBooking = await Booking.findOne({
-            _id: { $in: allBookingIds },
-            tripStatus: { $in: ["offloading", "returning"] }
-          }).select("_id tripId tripStatus");
-
-          if (currentLegBooking) {
-            const newBookingDoc = await Booking.findById(bookingId).select("tripId");
-            const newTripLabel = newBookingDoc?.tripId || `#${String(bookingId).slice(-6).toUpperCase()}`;
-
-            // Assigning a new job ends the current leg — mark the offloading/returning trip
-            // completed and freeze the truck's current position as its end point.
-            // Prefer the coords the client captured; otherwise look them up
-            // server-side so the end point is reliably set either way.
-            const endCoords = returningEndCoords || (await getVehiclePosition(truckNumber));
-            const completedBooking = await Booking.findByIdAndUpdate(currentLegBooking._id, {
-              tripStatus: "completed",
-              tripEndedAt: new Date(),
-              ...(endCoords ? { tripEndCoords: endCoords } : {}),
-              $push: {
-                timeline: {
-                  title: "New Job Assigned",
-                  description: `${newTripLabel} assigned to driver while ${currentLegBooking.tripStatus} — trip completed`,
-                  time: new Date(),
-                  status: "completed"
-                }
-              }
-            }, { new: true });
-
-            // Force-completed trips must land in the ledger too: with tax → INV, without → CASH
-            try {
-              await fileCompletedBooking(completedBooking);
-            } catch (fileErr) {
-              console.error("[Assignment] Invoice/Cash filing failed (non-critical):", fileErr);
-            }
-
-            // Mark previous assignment as completed
-            await Assignment.updateOne(
-              { bookingId: currentLegBooking._id },
-              { queueStatus: "completed" }
-            );
-
-            // Update driver to on_trip
-            await Driver.findByIdAndUpdate(driverId, { driverStatus: "on_trip" });
-
-            queueStatus = "active";
-            sequence = 1;
-          } else {
-            // Queue fallback if returning booking not found
-            const existingCount = await Assignment.countDocuments({
-              driverId,
-              queueStatus: { $in: ["active", "queued"] }
-            });
-            queueStatus = "queued";
-            sequence = existingCount + 1;
-            await Driver.findByIdAndUpdate(driverId, {
-              $push: { tripQueue: bookingId }
-            });
-          }
-        } catch (err) {
-          console.error("Failed to log new job on returning trip timeline:", err);
-          // Queue fallback
-          const existingCount = await Assignment.countDocuments({
-            driverId,
-            queueStatus: { $in: ["active", "queued"] }
+        // A driver may hold at most one queued trip. Without this, a third job
+        // would retarget the running trip again and orphan the first gap.
+        const alreadyQueued = await Assignment.countDocuments({ driverId, queueStatus: "queued" });
+        if (alreadyQueued > 0) {
+          res.status(400).json({
+            message: "This driver already has a queued trip. Complete it before assigning another.",
           });
-          queueStatus = "queued";
-          sequence = existingCount + 1;
-          await Driver.findByIdAndUpdate(driverId, {
-            $push: { tripQueue: bookingId }
-          });
+          return;
         }
+
+        const driverAssignments = await Assignment.find({ driverId }).select("bookingId").lean();
+        const allBookingIds = driverAssignments.map((a: any) => a.bookingId);
+
+        const runningBooking = await Booking.findOne({
+          _id: { $in: allBookingIds },
+          // repositioning included so a trip already diverted once is still found
+          // (the single-queued-trip guard above is what stops a second diversion)
+          tripStatus: { $in: [...ASSIGNABLE_STATUSES] }
+        });
+
+        const nextBooking = await Booking.findById(bookingId);
+
+        if (runningBooking && nextBooking) {
+          const { closedImmediately } = await retargetRunningTrip({
+            runningBooking, nextBooking, truckNumber, truckId,
+          });
+          // Only mark the driver as repositioning when there is ground to cover.
+          // If the next job starts where the truck already stands, that trip is
+          // already closed and the driver is simply between jobs.
+          if (!closedImmediately) {
+            await Driver.findByIdAndUpdate(driverId, { driverStatus: "repositioning" });
+          }
+          closedOnAssign = closedImmediately;
+        }
+
+        // Queue either way — including the fallback where no running trip was
+        // found, which previously activated the new job immediately instead.
+        const existingCount = await Assignment.countDocuments({
+          driverId,
+          queueStatus: { $in: ["active", "queued"] }
+        });
+        queueStatus = "queued";
+        sequence = existingCount + 1;
+        await Driver.findByIdAndUpdate(driverId, {
+          $push: { tripQueue: bookingId }
+        });
       } else {
         // Driver is busy on a non-returning leg — queue this assignment
         const existingCount = await Assignment.countDocuments({
@@ -166,6 +118,13 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
     });
 
     const savedAssignment = await newAssignment.save();
+
+    // The previous trip ended the moment this one was assigned, so hand the
+    // queued trip to the one helper that knows whether it may start yet — it
+    // still refuses to activate a trip the accountant has not approved.
+    if (closedOnAssign) {
+      await promoteNextForDriver(String(driverId));
+    }
 
     const timelineMsg = queueStatus === "queued"
       ? `Driver ${driverName} queued (position ${sequence}) with Truck ${truckNumber}`
@@ -277,24 +236,28 @@ export const promoteNextTrip = async (req: Request, res: Response, next: NextFun
       await Assignment.findByIdAndUpdate(activeAssignment._id, { queueStatus: "completed" });
     }
 
-    await promoteOrReturnDriver(driverIdStr);
+    const result = await promoteNextForDriver(driverIdStr);
 
     const updatedDriver = await Driver.findById(driverId);
     res.status(200).json({
-      message: updatedDriver?.driverStatus === "returning"
-        ? "All trips completed. Driver returning to warehouse."
-        : "Next queued trip is now active.",
-      driverStatus: updatedDriver?.driverStatus
+      message: result.promoted
+        ? "Next queued trip is now active."
+        : result.reason === "next trip is not approved yet"
+          ? "Next trip is queued but not yet approved by the accountant."
+          : "All trips completed. Driver returning to warehouse.",
+      driverStatus: updatedDriver?.driverStatus,
+      promoted: result.promoted,
+      reason: result.reason,
     });
   } catch (error: any) {
     next(error);
   }
 };
 
-// Trips that were auto-completed while the driver was returning (a new job was
-// assigned mid-return) never had their damages/DO recorded, because the truck
-// never came back for inspection. Return those still missing an inspection so the
-// completion modal can collect their damages/DO alongside the current trip.
+// Trips that completed away from the yard — the driver went straight on to the
+// next job's pickup, so the truck never came back for inspection. Return those
+// still missing one so the completion modal can collect their damages/DO
+// alongside the current trip.
 export const getPendingInspections = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const { truckNumber } = req.params;
   try {
@@ -302,20 +265,21 @@ export const getPendingInspections = async (req: Request, res: Response, next: N
     const truckAssignments = await Assignment.find({ truckNumber }).select("bookingId").lean();
     const bookingIds = truckAssignments.map((a: any) => a.bookingId);
 
-    // Auto-completed-while-returning trips: completed + a "New Job Assigned" timeline entry
-    const autoCompleted = await Booking.find({
+    // Completed trips for this truck. The old query also required a timeline
+    // marker, which no longer implies completion — a retargeted trip carries the
+    // marker while still running, and completes long afterwards.
+    const uninspected = await Booking.find({
       _id: { $in: bookingIds },
-      tripStatus: "completed",
-      "timeline.title": "New Job Assigned",
+      tripStatus: { $in: ["completed", "delivered"] },
     }).select("_id tripId tripEndedAt").lean();
 
     // Drop the ones that already have an inspection on record for that trip
     const inspected = await TruckInspection.find({
-      bookingId: { $in: autoCompleted.map((b: any) => b._id) },
+      bookingId: { $in: uninspected.map((b: any) => b._id) },
     }).select("bookingId").lean();
     const inspectedIds = new Set(inspected.map((i: any) => String(i.bookingId)));
 
-    const pending = autoCompleted
+    const pending = uninspected
       .filter((b: any) => !inspectedIds.has(String(b._id)))
       .map((b: any) => ({
         bookingId: b._id,
@@ -350,11 +314,14 @@ export const markTruckInspected = async (req: Request, res: Response, next: Next
     });
     await inspection.save();
 
-    // Reset driver to available
+    // Reset driver to available. tripQueue is NOT cleared here: the ops
+    // completion modal calls this BEFORE marking the trip completed, so wiping
+    // the queue would destroy it one request before promotion reads it.
+    // promoteNextForDriver $pulls each booking as it activates, which is the
+    // right granularity.
     await Driver.findByIdAndUpdate(driverId, {
       driverStatus: "available",
       needsTruckInspection: false,
-      tripQueue: []
     });
 
     res.status(200).json({ message: "Truck inspection complete. Driver is now available.", inspection });
@@ -367,7 +334,7 @@ export const markTruckInspected = async (req: Request, res: Response, next: Next
 export const getReturningDrivers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const drivers = await Driver.find({
-      driverStatus: { $in: ["returning", "under_inspection"] }
+      driverStatus: { $in: ["returning", "repositioning", "under_inspection"] }
     }).populate("assignedTruck");
     res.status(200).json(drivers);
   } catch (error: any) {

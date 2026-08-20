@@ -50,6 +50,17 @@ export interface IBooking extends Document {
   tripEndCoords?: { lat: number; lng: number; location?: string };
   tripStartedAt?: Date;
   tripEndedAt?: Date;
+  // Where this trip actually ends. Absent means the default — back to the
+  // warehouse. Set to the next job's pickup when a returning/offloading driver
+  // is reassigned, at which point the trip completes on arrival there instead
+  // (CR-VL-001 §3). tripEndCoords cannot carry this: it holds coordinates and is
+  // only ever written by a completion call.
+  lastPoint?: {
+    label: string;
+    source: "warehouse" | "reassignment";
+    fromBookingId?: mongoose.Types.ObjectId;
+    setAt: Date;
+  };
   tollAmount?: number; // sum of eToll sheet entries matched to this trip (auto-synced)
   tripStats?: any; // cached Trakzee GPS travel summary (last fetched)
   tripStatsUpdatedAt?: Date;
@@ -142,6 +153,12 @@ const BookingSchema: Schema = new Schema(
     },
     tripStartedAt: { type: Date },
     tripEndedAt:   { type: Date },
+    lastPoint: {
+      label:         { type: String },
+      source:        { type: String, enum: ["warehouse", "reassignment"] },
+      fromBookingId: { type: Schema.Types.ObjectId, ref: "Booking" },
+      setAt:         { type: Date },
+    },
     tollAmount:    { type: Number, default: 0 }, // sum of matched eToll sheet entries (auto-synced)
     tripStats:          { type: Schema.Types.Mixed, default: null },
     tripStatsUpdatedAt: { type: Date },

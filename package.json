@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "npm install && node node_modules/typescript/bin/tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
   "repository": {
     "type": "git",

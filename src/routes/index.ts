@@ -16,6 +16,8 @@ import chatRoutes from "./chatRoutes.js";
 import routeRoutes from "./routeRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import mileageRoutes from "./mileageRoutes.js";
+import warehouseRoutes from "./warehouseRoutes.js";
+import tripGapRoutes from "./tripGapRoutes.js";
 import ledgerRoutes from "./ledgerRoutes.js";
 import invoiceRoutes from "./invoiceRoutes.js";
 import cashRoutes from "./cashRoutes.js";
@@ -52,6 +54,8 @@ export function registerRoutes(app: Application): void {
   app.use("/api/truck-inspections", admin, truckInspectionRoutes);
   app.use("/api/toll", admin, tollRoutes);
   app.use("/api/mileage", admin, mileageRoutes);
+  app.use("/api/warehouse", admin, warehouseRoutes);
+  app.use("/api/trip-gaps", admin, tripGapRoutes);
   app.use("/api/ledger", admin, ledgerRoutes);
   app.use("/api/invoices", admin, invoiceRoutes);
   app.use("/api/cash", admin, cashRoutes);
