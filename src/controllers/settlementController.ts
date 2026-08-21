@@ -70,10 +70,17 @@ export const createOrUpdateSettlement = async (req: Request, res: Response, next
       updateData.status = "Approved";
     }
 
+    // A leg-only write may be the FIRST thing written for a trip — claiming a gap
+    // happens before anyone has approved anything — so it may create the document
+    // too. What it must not do is create it Approved: the schema defaults status
+    // to "Approved", which would hand a free approval to every such write.
+    const update: any = { $set: updateData };
+    if (!isApproval) update.$setOnInsert = { status: "Pending" };
+
     const settlement = await Settlement.findOneAndUpdate(
        { bookingId },
-       { $set: updateData },
-       { new: true, upsert: isApproval }
+       update,
+       { new: true, upsert: isApproval || Boolean(incomingExtraLegs) }
      );
 
     if (!settlement) {

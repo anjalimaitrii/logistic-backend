@@ -5,7 +5,15 @@ import Notification from "../models/Notification.js";
 import { getIo } from "../socket.js";
 import { fileCompletedBooking } from "../services/completionRecords.js";
 import { getFreshVehiclePosition } from "./liveTrackingController.js";
-import { isFinalLeg } from "../lib/tripStatus.js";
+import { isFinalLeg, isCargoDone } from "../lib/tripStatus.js";
+import { locationLabel } from "../lib/gapDetection.js";
+import { upsertReturnLeg } from "../lib/returnLeg.js";
+import { computeLegTotals } from "../lib/legTotals.js";
+import Settlement from "../models/Settlement.js";
+import Assignment from "../models/Assignment.js";
+import Driver from "../models/Driver.js";
+import Warehouse from "../models/Warehouse.js";
+import Mileage from "../models/Mileage.js";
 
 export const createBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -486,4 +494,100 @@ export const changeDropoffAddress = async (req: Request, res: Response, next: Ne
   } catch (error: any) {
     next(error);
   }
+};
+
+/**
+ * Mark a truck as returning to the yard, WITH the distance it will cover.
+ *
+ * Ops used to set the status here and the accountant typed the kilometres later,
+ * on another screen — and nothing made the second half happen, so a trip could
+ * sit in "returning" with its empty run costed at nothing. One call now does
+ * both, and refuses without a distance.
+ */
+export const markReturning = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { toLabel, km, addedBy } = req.body;
+
+    const distance = Number(km);
+    if (!Number.isFinite(distance) || distance <= 0) {
+      res.status(400).json({ message: "Enter the distance of the run back to the yard." });
+      return;
+    }
+
+    const booking = await Booking.findById(id)
+      .select("tripId tripStatus pickupLocations dropoffLocations lastPoint")
+      .lean();
+    if (!booking) { res.status(404).json({ message: "Booking not found" }); return; }
+
+    // A diverted trip is not going to the yard at all — its empty run belongs to
+    // the gap onto the next job's pickup, which the accountant attributes.
+    if (booking.lastPoint?.source === "reassignment") {
+      res.status(400).json({ message: "This trip was diverted to another job's pickup — it is not returning to the yard." });
+      return;
+    }
+
+    if (!isCargoDone(booking.tripStatus, (booking.pickupLocations || []).length, (booking.dropoffLocations || []).length)) {
+      res.status(400).json({ message: "The cargo is not off yet — finish the drops before marking the return." });
+      return;
+    }
+
+    const drops = booking.dropoffLocations || [];
+    const from = locationLabel(drops[drops.length - 1]);
+    const warehouse = await Warehouse.findOne().select("city").lean();
+    const to = String(toLabel || "").trim() || warehouse?.city || "";
+
+    // Mileage and fuel rate come from the same places the accountant screen reads,
+    // so a leg recorded here costs exactly what it would have cost typed there.
+    const mileage = await Mileage.findOne().lean();
+    const settlement = await Settlement.findOne({ bookingId: id }).lean();
+    const unloaded = Number(mileage?.unloadedMileage) || 1;
+    const fuelRate = Number(settlement?.fuelDetails?.fuelRate) || 0;
+
+    const extraLegs = upsertReturnLeg(settlement?.extraLegs as any, {
+      from, to, km: distance, mileage: unloaded, fuelRate, addedBy,
+    });
+
+    const legs = settlement?.fuelDetails?.legs || [];
+    const { totalDistance, totalLiters } = computeLegTotals(legs as any, extraLegs as any);
+
+    // upsert: a trip can reach its drop before anyone has opened its settlement,
+    // and the distance must not be lost because of that.
+    await Settlement.findOneAndUpdate(
+      { bookingId: id },
+      {
+        $set: {
+          extraLegs,
+          "fuelDetails.legs": legs,
+          "fuelDetails.fuelRate": fuelRate,
+          "fuelDetails.totalDistance": totalDistance,
+          "fuelDetails.totalLiters": totalLiters,
+        },
+      },
+      { upsert: true }
+    );
+
+    const updated = await Booking.findByIdAndUpdate(
+      id,
+      {
+        $set: { tripStatus: "returning" },
+        $push: {
+          timeline: {
+            title: "Returning",
+            description: `Cargo delivered — running empty ${from || "from the drop"} to ${to || "the yard"} (${distance} km).`,
+            time: new Date(),
+            status: "completed",
+          },
+        },
+      },
+      { new: true }
+    );
+
+    const assignment = await Assignment.findOne({ bookingId: id }).select("driverId").lean();
+    if (assignment?.driverId) {
+      await Driver.findByIdAndUpdate(assignment.driverId, { driverStatus: "returning" });
+    }
+
+    res.status(200).json({ message: "Return recorded.", booking: updated, extraLegs });
+  } catch (error: any) { next(error); }
 };
