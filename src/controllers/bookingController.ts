@@ -507,7 +507,10 @@ export const changeDropoffAddress = async (req: Request, res: Response, next: Ne
 export const markReturning = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { toLabel, km, addedBy } = req.body;
+    // The yard is not a choice: it is whatever Route Master holds, so ops cannot
+    // send the truck "home" to a place that is not home. What ops DOES decide is
+    // what the run costs on top of what the trip already carries.
+    const { km, addAllocation, addCouncilLevy, addToll, addedBy } = req.body;
 
     const distance = Number(km);
     if (!Number.isFinite(distance) || distance <= 0) {
@@ -535,7 +538,11 @@ export const markReturning = async (req: Request, res: Response, next: NextFunct
     const drops = booking.dropoffLocations || [];
     const from = locationLabel(drops[drops.length - 1]);
     const warehouse = await Warehouse.findOne().select("city").lean();
-    const to = String(toLabel || "").trim() || warehouse?.city || "";
+    const to = warehouse?.city || "";
+    if (!to) {
+      res.status(400).json({ message: "Set the warehouse on Route Master before recording a return." });
+      return;
+    }
 
     // Mileage and fuel rate come from the same places the accountant screen reads,
     // so a leg recorded here costs exactly what it would have cost typed there.
@@ -551,18 +558,41 @@ export const markReturning = async (req: Request, res: Response, next: NextFunct
     const legs = settlement?.fuelDetails?.legs || [];
     const { totalDistance, totalLiters } = computeLegTotals(legs as any, extraLegs as any);
 
+    // The run home costs money the trip has not been given yet, so what ops enters
+    // is ADDED to what the trip already carries rather than replacing it — the
+    // allowance for the outbound leg is still owed either way.
+    const money = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+    const prior = settlement?.financials || ({} as any);
+    const financials = {
+      ...prior,
+      cashAllocation: money(prior.cashAllocation) + money(addAllocation),
+      councilLevy: money(prior.councilLevy) + money(addCouncilLevy),
+      tollAmount: money(prior.tollAmount) + money(addToll),
+      // Fuel follows the legs, so adding one has to move it.
+      fuelTotal:
+        (legs as any[]).reduce((n, l) => n + money(l?.amount), 0) +
+        extraLegs.reduce((n, l) => n + money(l?.amount), 0),
+    };
+
     // upsert: a trip can reach its drop before anyone has opened its settlement,
-    // and the distance must not be lost because of that.
+    // and the distance must not be lost because of that. NOT an approval — recording
+    // a return says nothing about whether the figures have been signed off.
     await Settlement.findOneAndUpdate(
       { bookingId: id },
       {
         $set: {
           extraLegs,
+          financials,
+          tollAmount: financials.tollAmount,
           "fuelDetails.legs": legs,
           "fuelDetails.fuelRate": fuelRate,
           "fuelDetails.totalDistance": totalDistance,
           "fuelDetails.totalLiters": totalLiters,
         },
+        $setOnInsert: { status: "Pending" },
       },
       { upsert: true }
     );
@@ -574,7 +604,11 @@ export const markReturning = async (req: Request, res: Response, next: NextFunct
         $push: {
           timeline: {
             title: "Returning",
-            description: `Cargo delivered — running empty ${from || "from the drop"} to ${to || "the yard"} (${distance} km).`,
+            description:
+              `Cargo delivered — running empty ${from || "from the drop"} to ${to} (${distance} km).` +
+              (money(addAllocation) || money(addCouncilLevy) || money(addToll)
+                ? ` Added for the return: allowance K${money(addAllocation).toLocaleString()}, levy K${money(addCouncilLevy).toLocaleString()}, toll K${money(addToll).toLocaleString()}.`
+                : ""),
             time: new Date(),
             status: "completed",
           },
@@ -588,6 +622,6 @@ export const markReturning = async (req: Request, res: Response, next: NextFunct
       await Driver.findByIdAndUpdate(assignment.driverId, { driverStatus: "returning" });
     }
 
-    res.status(200).json({ message: "Return recorded.", booking: updated, extraLegs });
+    res.status(200).json({ message: "Return recorded.", booking: updated, extraLegs, financials });
   } catch (error: any) { next(error); }
 };
