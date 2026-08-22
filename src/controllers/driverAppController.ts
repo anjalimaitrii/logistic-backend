@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { fileCompletedBooking } from "../services/completionRecords.js";
 import { getFreshVehiclePosition } from "./liveTrackingController.js";
-import { isFinalLeg, isOffloading } from "../lib/tripStatus.js";
+import { isFinalLeg, isLastOffloading } from "../lib/tripStatus.js";
 
 // POST /api/driver-app/login
 export const loginDriver = async (req: AuthedRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -188,14 +188,23 @@ export const updateDriverTripStatus = async (req: AuthedRequest, res: Response, 
       await onTripStarted(String(bookingId));
     }
 
-    // Offloading logic: driver becomes assignable for a new trip (assigning one
-    // auto-completes this trip with the truck's current position as end point,
-    // same as the returning flow)
-    // Suffix-aware: a multi-stop trip reports "offloading_2".
-    if (isOffloading(tripStatus)) {
+    // Offloading logic: the driver becomes assignable for a new trip — but only at
+    // the LAST drop. A truck emptying the first of three still has two loads
+    // aboard and cannot be sent anywhere else.
+    const forDriver = await Booking.findById(bookingId)
+      .select("pickupLocations dropoffLocations")
+      .lean();
+    if (
+      isLastOffloading(
+        tripStatus,
+        (forDriver?.pickupLocations || []).length,
+        (forDriver?.dropoffLocations || []).length
+      )
+    ) {
       const assignment = await Assignment.findOne({ bookingId });
       if (assignment?.driverId) {
         await Driver.findByIdAndUpdate(assignment.driverId, {
+          // Stored without the stop number: which stop it is belongs to the trip.
           driverStatus: "offloading"
         });
       }

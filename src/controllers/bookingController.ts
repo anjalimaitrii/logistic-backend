@@ -339,7 +339,12 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
     // Suffix-aware: a multi-stop trip reports "offloading_2", and comparing that
     // to "offloading" left the driver marked on_trip — so every screen that asks
     // "can this driver take another job" said no.
-    const nextDriverStatus = driverStatusFor(tripStatus);
+    const forDriver = await Booking.findById(id).select("pickupLocations dropoffLocations").lean();
+    const nextDriverStatus = driverStatusFor(
+      tripStatus,
+      (forDriver?.pickupLocations || []).length,
+      (forDriver?.dropoffLocations || []).length
+    );
     if (nextDriverStatus) {
       try {
         const Assignment = (await import("../models/Assignment.js")).default;

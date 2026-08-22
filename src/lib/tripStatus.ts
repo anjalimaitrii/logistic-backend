@@ -75,20 +75,33 @@ export function isOffloading(tripStatus?: string): boolean {
  * The driver status that goes with a trip status, or null when the trip has not
  * reached a point that changes what the driver is doing.
  *
- * Deliberately drops the `_n` suffix. A driver is offloading; they are not
- * "offloading_2" — which stop it is belongs to the trip, not to the person. The
- * suffix leaking through is what made every screen comparing driverStatus to
- * "offloading" decide a multi-stop driver was still mid-trip and unavailable.
+ * "offloading" means the driver is finishing up and can be handed another job.
+ * That is only true at the LAST drop — a truck emptying the first of three still
+ * has two loads aboard and cannot go anywhere else. Marking them free at every
+ * drop offered a driver for reassignment mid-route.
+ *
+ * The `_n` suffix is dropped from what gets stored: a driver is offloading, not
+ * "offloading_2". Which stop it is belongs to the trip, not to the person, and
+ * the suffix leaking through made every screen comparing driverStatus with
+ * "offloading" read a multi-stop driver as still mid-trip.
  */
-export function driverStatusFor(tripStatus?: string): string | null {
-  if (isOffloading(tripStatus)) return "offloading";
+export function driverStatusFor(
+  tripStatus: string | undefined,
+  pickupCount: number,
+  dropoffCount: number
+): string | null {
+  if (isLastOffloading(tripStatus, pickupCount, dropoffCount)) return "offloading";
   if (isFinalLeg(tripStatus)) return norm(tripStatus);
+  // Mid-route drops change nothing about the driver: they are still on the trip.
   return null;
 }
 
 /**
- * Matches any status at which a driver may be handed a new job, INCLUDING the
- * suffixed forms a multi-stop trip uses. A plain `$in: ASSIGNABLE_STATUSES`
- * query silently skipped every multi-stop trip.
+ * Matches any status a RUNNING trip can hold when a new job is assigned to its
+ * driver, including the suffixed forms a multi-stop trip uses. Used to FIND the
+ * running trip; whether it may be closed or retargeted is a separate question
+ * that isCargoDone answers, and it is stricter — only the last drop counts.
+ *
+ * A plain `$in: ASSIGNABLE_STATUSES` query silently skipped every multi-stop trip.
  */
 export const ASSIGNABLE_STATUS_REGEX = /^(offloading(_\d+)?|returning|repositioning)$/i;

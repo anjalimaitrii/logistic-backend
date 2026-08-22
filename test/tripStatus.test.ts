@@ -88,19 +88,34 @@ test("offloading does not match its neighbours", () => {
   assert.equal(isOffloading(undefined), false);
 });
 
-test("the driver status drops the stop number", () => {
-  // Which stop it is belongs to the trip, not to the person.
-  assert.equal(driverStatusFor("offloading_2"), "offloading");
-  assert.equal(driverStatusFor("offloading"), "offloading");
-  assert.equal(driverStatusFor("returning"), "returning");
-  assert.equal(driverStatusFor("repositioning"), "repositioning");
+test("the driver is free only at the LAST drop", () => {
+  // A truck emptying the first of three still has two loads aboard, so it cannot
+  // be handed another job — offering it was how a driver got reassigned mid-route.
+  assert.equal(driverStatusFor("offloading_1", 1, 3), null);
+  assert.equal(driverStatusFor("offloading_2", 1, 3), null);
+  assert.equal(driverStatusFor("offloading_3", 1, 3), "offloading");
+});
+
+test("a single-drop trip frees the driver at its only drop", () => {
+  assert.equal(driverStatusFor("offloading", 1, 1), "offloading");
+  // Two pickups force the suffix even with one drop, and that one IS the last.
+  assert.equal(driverStatusFor("offloading_1", 2, 1), "offloading");
+});
+
+test("the stored driver status carries no stop number", () => {
+  assert.equal(driverStatusFor("offloading_3", 1, 3), "offloading");
+});
+
+test("both final legs pass straight through", () => {
+  assert.equal(driverStatusFor("returning", 1, 3), "returning");
+  assert.equal(driverStatusFor("repositioning", 1, 3), "repositioning");
 });
 
 test("statuses that do not change what the driver is doing yield null", () => {
-  for (const s of ["started", "arrived_1", "loading_2", "departed", "reached_1", "completed"]) {
-    assert.equal(driverStatusFor(s), null, `${s} should not set a driver status`);
+  for (const st of ["started", "arrived_1", "loading_2", "departed", "reached_1", "completed"]) {
+    assert.equal(driverStatusFor(st, 1, 1), null, st + " should not set a driver status");
   }
-  assert.equal(driverStatusFor(undefined), null);
+  assert.equal(driverStatusFor(undefined, 1, 1), null);
 });
 
 test("the assignable regex covers suffixed offloading", () => {
