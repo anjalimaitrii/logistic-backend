@@ -5,7 +5,7 @@ import Notification from "../models/Notification.js";
 import { getIo } from "../socket.js";
 import { fileCompletedBooking } from "../services/completionRecords.js";
 import { getFreshVehiclePosition } from "./liveTrackingController.js";
-import { isFinalLeg, isCargoDone } from "../lib/tripStatus.js";
+import { isFinalLeg, isCargoDone, driverStatusFor } from "../lib/tripStatus.js";
 import { locationLabel } from "../lib/gapDetection.js";
 import { upsertReturnLeg } from "../lib/returnLeg.js";
 import { computeLegTotals } from "../lib/legTotals.js";
@@ -336,7 +336,11 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
     // When driver marks offloading/returning → update their driverStatus so they appear available for queueing
     // repositioning counts here too: the driver is on their final unladen leg,
     // just aimed at the next job's pickup rather than the yard.
-    if (tripStatus === "offloading" || isFinalLeg(tripStatus)) {
+    // Suffix-aware: a multi-stop trip reports "offloading_2", and comparing that
+    // to "offloading" left the driver marked on_trip — so every screen that asks
+    // "can this driver take another job" said no.
+    const nextDriverStatus = driverStatusFor(tripStatus);
+    if (nextDriverStatus) {
       try {
         const Assignment = (await import("../models/Assignment.js")).default;
         const Driver = (await import("../models/Driver.js")).default;
@@ -344,7 +348,8 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
         const assignment = await Assignment.findOne({ bookingId: id });
         if (assignment?.driverId) {
           await Driver.findByIdAndUpdate(assignment.driverId, {
-            driverStatus: tripStatus
+            // Stored WITHOUT the stop number: which stop it is belongs to the trip.
+            driverStatus: nextDriverStatus
           });
         }
       } catch (err) {

@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { fileCompletedBooking } from "../services/completionRecords.js";
 import { getFreshVehiclePosition } from "./liveTrackingController.js";
-import { isFinalLeg } from "../lib/tripStatus.js";
+import { isFinalLeg, isOffloading } from "../lib/tripStatus.js";
 
 // POST /api/driver-app/login
 export const loginDriver = async (req: AuthedRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -191,7 +191,8 @@ export const updateDriverTripStatus = async (req: AuthedRequest, res: Response, 
     // Offloading logic: driver becomes assignable for a new trip (assigning one
     // auto-completes this trip with the truck's current position as end point,
     // same as the returning flow)
-    if (tripStatus.toLowerCase() === "offloading") {
+    // Suffix-aware: a multi-stop trip reports "offloading_2".
+    if (isOffloading(tripStatus)) {
       const assignment = await Assignment.findOne({ bookingId });
       if (assignment?.driverId) {
         await Driver.findByIdAndUpdate(assignment.driverId, {

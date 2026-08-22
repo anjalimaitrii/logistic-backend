@@ -4,7 +4,7 @@ import Booking from "../models/Booking.js";
 import Driver from "../models/Driver.js";
 import TruckInspection from "../models/TruckInspection.js";
 import { retargetRunningTrip, promoteNextForDriver } from "../services/tripContinuity.js";
-import { ASSIGNABLE_STATUSES } from "../lib/tripStatus.js";
+import { ASSIGNABLE_STATUS_REGEX } from "../lib/tripStatus.js";
 import { normalizeTyres, worstTyreCondition, joinTyreNumbers } from "../lib/tyreInspection.js";
 import { mergeFittedTyres, fittedTyresChanged } from "../lib/fittedTyres.js";
 import Truck from "../models/Truck.js";
@@ -61,7 +61,10 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
           _id: { $in: allBookingIds },
           // repositioning included so a trip already diverted once is still found
           // (the single-queued-trip guard above is what stops a second diversion)
-          tripStatus: { $in: [...ASSIGNABLE_STATUSES] }
+          // Regex, not $in: a multi-stop trip sits at "offloading_2", which no
+          // list of plain statuses matches — so the running trip was never found
+          // and the new job was queued without retargeting anything.
+          tripStatus: { $regex: ASSIGNABLE_STATUS_REGEX }
         });
 
         const nextBooking = await Booking.findById(bookingId);

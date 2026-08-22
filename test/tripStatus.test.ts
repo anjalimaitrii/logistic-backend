@@ -6,6 +6,9 @@ import {
   isLastOffloading,
   isCargoDone,
   ASSIGNABLE_STATUSES,
+  isOffloading,
+  driverStatusFor,
+  ASSIGNABLE_STATUS_REGEX,
 } from "../src/lib/tripStatus.js";
 
 test("returning and repositioning are both final legs", () => {
@@ -67,4 +70,44 @@ test("cargo is done on the last drop or once already unladen", () => {
   // Two drops still outstanding — a new job must not fast-forward past them.
   assert.equal(isCargoDone("offloading_1", 1, 3), false);
   assert.equal(isCargoDone("reached_2", 1, 3), false);
+});
+
+test("offloading is recognised with and without a stop suffix", () => {
+  // A multi-stop trip reports "offloading_2"; comparing that to "offloading"
+  // left the driver marked on_trip and unavailable for the next job.
+  assert.equal(isOffloading("offloading"), true);
+  assert.equal(isOffloading("offloading_1"), true);
+  assert.equal(isOffloading("offloading_12"), true);
+  assert.equal(isOffloading(" OFFLOADING_2 "), true);
+});
+
+test("offloading does not match its neighbours", () => {
+  assert.equal(isOffloading("reached_1"), false);
+  assert.equal(isOffloading("offloadingx"), false);
+  assert.equal(isOffloading("offloading_"), false);
+  assert.equal(isOffloading(undefined), false);
+});
+
+test("the driver status drops the stop number", () => {
+  // Which stop it is belongs to the trip, not to the person.
+  assert.equal(driverStatusFor("offloading_2"), "offloading");
+  assert.equal(driverStatusFor("offloading"), "offloading");
+  assert.equal(driverStatusFor("returning"), "returning");
+  assert.equal(driverStatusFor("repositioning"), "repositioning");
+});
+
+test("statuses that do not change what the driver is doing yield null", () => {
+  for (const s of ["started", "arrived_1", "loading_2", "departed", "reached_1", "completed"]) {
+    assert.equal(driverStatusFor(s), null, `${s} should not set a driver status`);
+  }
+  assert.equal(driverStatusFor(undefined), null);
+});
+
+test("the assignable regex covers suffixed offloading", () => {
+  for (const s of ["offloading", "offloading_1", "offloading_3", "returning", "repositioning"]) {
+    assert.equal(ASSIGNABLE_STATUS_REGEX.test(s), true, `${s} should be assignable`);
+  }
+  for (const s of ["started", "reached_1", "completed", "loading_2"]) {
+    assert.equal(ASSIGNABLE_STATUS_REGEX.test(s), false, `${s} must not be assignable`);
+  }
 });

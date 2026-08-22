@@ -65,3 +65,30 @@ export function isCargoDone(
 ): boolean {
   return isFinalLeg(tripStatus) || isLastOffloading(tripStatus, pickupCount, dropoffCount);
 }
+
+/** True for `offloading`, `offloading_1`, `offloading_2`, … */
+export function isOffloading(tripStatus?: string): boolean {
+  return /^offloading(_\d+)?$/.test(norm(tripStatus));
+}
+
+/**
+ * The driver status that goes with a trip status, or null when the trip has not
+ * reached a point that changes what the driver is doing.
+ *
+ * Deliberately drops the `_n` suffix. A driver is offloading; they are not
+ * "offloading_2" — which stop it is belongs to the trip, not to the person. The
+ * suffix leaking through is what made every screen comparing driverStatus to
+ * "offloading" decide a multi-stop driver was still mid-trip and unavailable.
+ */
+export function driverStatusFor(tripStatus?: string): string | null {
+  if (isOffloading(tripStatus)) return "offloading";
+  if (isFinalLeg(tripStatus)) return norm(tripStatus);
+  return null;
+}
+
+/**
+ * Matches any status at which a driver may be handed a new job, INCLUDING the
+ * suffixed forms a multi-stop trip uses. A plain `$in: ASSIGNABLE_STATUSES`
+ * query silently skipped every multi-stop trip.
+ */
+export const ASSIGNABLE_STATUS_REGEX = /^(offloading(_\d+)?|returning|repositioning)$/i;
