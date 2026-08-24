@@ -21,3 +21,24 @@ test("an explicitly undefined financials is not an approval", () => {
 test("a null financials is not an approval", () => {
   assert.equal(isApprovalWrite({ financials: null } as any), false);
 });
+
+test("saving legs while claiming a gap is NOT an approval", () => {
+  // The claim button posts the route and its costs but no financials. Treating
+  // that as an approval let one click approve a trip whose fuel rate was still
+  // zero, past every guard the Approve button applies.
+  const legOnlyWrite = {
+    bookingId: "b1",
+    fuelDetails: { fuelRate: 0, legs: [] },
+    extraLegs: [{ kind: "transit", gapId: "g1", km: 40 }],
+    returnLegDismissed: false,
+    expenses: [],
+  };
+  assert.equal(isApprovalWrite(legOnlyWrite), false);
+});
+
+test("the same write WITH financials is an approval", () => {
+  assert.equal(
+    isApprovalWrite({ extraLegs: [{ kind: "transit" }], financials: { cashAllocation: 500 } }),
+    true
+  );
+});
