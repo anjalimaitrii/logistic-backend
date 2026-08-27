@@ -3,8 +3,10 @@ import Assignment from "../models/Assignment.js";
 import Booking from "../models/Booking.js";
 import Driver from "../models/Driver.js";
 import TruckInspection from "../models/TruckInspection.js";
-import { retargetRunningTrip, promoteNextForDriver } from "../services/tripContinuity.js";
-import { ASSIGNABLE_STATUS_REGEX } from "../lib/tripStatus.js";
+import Settlement from "../models/Settlement.js";
+import { promoteNextForDriver } from "../services/tripContinuity.js";
+import { acquireBookingForDriver, releaseBookingFromDriver } from "../services/assignmentTransfer.js";
+import { isAssignmentLocked, sameDriver } from "../lib/reassignment.js";
 import { normalizeTyres, worstTyreCondition, joinTyreNumbers } from "../lib/tyreInspection.js";
 import { mergeFittedTyres, fittedTyresChanged } from "../lib/fittedTyres.js";
 import Truck from "../models/Truck.js";
@@ -21,95 +23,14 @@ export const createAssignment = async (req: Request, res: Response, next: NextFu
       return;
     }
 
-    const driver = await Driver.findById(driverId);
-    if (!driver) {
-      res.status(404).json({ message: "Driver not found" });
+    const acquired = await acquireBookingForDriver({
+      driverId, bookingId, truckNumber, truckId,
+    });
+    if (!acquired.ok) {
+      res.status(acquired.message === "Driver not found" ? 404 : 400).json({ message: acquired.message });
       return;
     }
-
-    let queueStatus = "active";
-    let sequence = 1;
-    // Set when the previous trip closed on the spot because this job starts at
-    // the same point — the queued trip is then eligible to start right away.
-    let closedOnAssign = false;
-
-    if (
-      driver.driverStatus === "on_trip" ||
-      driver.driverStatus === "offloading" ||
-      driver.driverStatus === "returning" ||
-      driver.driverStatus === "repositioning"
-    ) {
-      if (driver.driverStatus === "returning" || driver.driverStatus === "offloading") {
-        // CR-VL-001 §3: do NOT complete the running trip. Retarget it to end at
-        // this new job's pickup, and queue the new job behind it. The empty
-        // distance in between is what the accountant then bills.
-
-        // A driver may hold at most one queued trip. Without this, a third job
-        // would retarget the running trip again and orphan the first gap.
-        const alreadyQueued = await Assignment.countDocuments({ driverId, queueStatus: "queued" });
-        if (alreadyQueued > 0) {
-          res.status(400).json({
-            message: "This driver already has a queued trip. Complete it before assigning another.",
-          });
-          return;
-        }
-
-        const driverAssignments = await Assignment.find({ driverId }).select("bookingId").lean();
-        const allBookingIds = driverAssignments.map((a: any) => a.bookingId);
-
-        const runningBooking = await Booking.findOne({
-          _id: { $in: allBookingIds },
-          // repositioning included so a trip already diverted once is still found
-          // (the single-queued-trip guard above is what stops a second diversion)
-          // Regex, not $in: a multi-stop trip sits at "offloading_2", which no
-          // list of plain statuses matches — so the running trip was never found
-          // and the new job was queued without retargeting anything.
-          tripStatus: { $regex: ASSIGNABLE_STATUS_REGEX }
-        });
-
-        const nextBooking = await Booking.findById(bookingId);
-
-        if (runningBooking && nextBooking) {
-          const { closedImmediately } = await retargetRunningTrip({
-            runningBooking, nextBooking, truckNumber, truckId,
-          });
-          // Only mark the driver as repositioning when there is ground to cover.
-          // If the next job starts where the truck already stands, that trip is
-          // already closed and the driver is simply between jobs.
-          if (!closedImmediately) {
-            await Driver.findByIdAndUpdate(driverId, { driverStatus: "repositioning" });
-          }
-          closedOnAssign = closedImmediately;
-        }
-
-        // Queue either way — including the fallback where no running trip was
-        // found, which previously activated the new job immediately instead.
-        const existingCount = await Assignment.countDocuments({
-          driverId,
-          queueStatus: { $in: ["active", "queued"] }
-        });
-        queueStatus = "queued";
-        sequence = existingCount + 1;
-        await Driver.findByIdAndUpdate(driverId, {
-          $push: { tripQueue: bookingId }
-        });
-      } else {
-        // Driver is busy on a non-returning leg — queue this assignment
-        const existingCount = await Assignment.countDocuments({
-          driverId,
-          queueStatus: { $in: ["active", "queued"] }
-        });
-        queueStatus = "queued";
-        sequence = existingCount + 1;
-
-        await Driver.findByIdAndUpdate(driverId, {
-          $push: { tripQueue: bookingId }
-        });
-      }
-    } else {
-      // available (or legacy driver without driverStatus) — start immediately
-      await Driver.findByIdAndUpdate(driverId, { driverStatus: "on_trip" });
-    }
+    const { queueStatus, sequence, closedOnAssign } = acquired;
 
     const newAssignment = new Assignment({
       bookingId,
@@ -182,8 +103,14 @@ export const getAssignmentByBookingId = async (req: Request, res: Response, next
 
 export const updateAssignment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { bookingId } = req.params;
+    const bookingId = String(req.params.bookingId);
     const { driverName, driverId, truckId, truckNumber, truckHealth, collectionArea, queueStatus } = req.body;
+
+    const assignment = await Assignment.findOne({ bookingId });
+    if (!assignment) {
+      res.status(404).json({ message: "Assignment not found" });
+      return;
+    }
 
     const updateFields: any = {};
     if (driverName !== undefined) updateFields.driverName = driverName;
@@ -194,18 +121,74 @@ export const updateAssignment = async (req: Request, res: Response, next: NextFu
     if (collectionArea !== undefined) updateFields.collectionArea = collectionArea;
     if (queueStatus !== undefined) updateFields.queueStatus = queueStatus;
 
-    const assignment = await Assignment.findOneAndUpdate(
+    // Swapping the fleet unit is a handover, not a field edit. Writing only the
+    // Assignment document left the outgoing driver marked on_trip holding no job
+    // — nothing frees a driver with no active assignment — while the incoming
+    // one stayed "available" and was shown as ON TRIP purely because the active
+    // assignment now pointed at them. One trip, two drivers on the board.
+    const previousDriverId = assignment.driverId ? String(assignment.driverId) : "";
+    const isHandover = driverId !== undefined && !sameDriver(previousDriverId, driverId);
+    let closedOnAssign = false;
+
+    if (isHandover) {
+      // Ops may change the unit right up until the accountant signs off. After
+      // that the approved figures were costed against this truck, so it is
+      // locked — the panel greys the control out, and this is the same rule on
+      // the server, where a stale page cannot get around it.
+      const settlement = await Settlement.findOne({ bookingId }).select("status").lean();
+      if (isAssignmentLocked((settlement as any)?.status)) {
+        res.status(409).json({
+          message: "This job's settlement is approved — the fleet unit can no longer be changed.",
+        });
+        return;
+      }
+
+      const acquired = await acquireBookingForDriver({
+        driverId,
+        bookingId,
+        truckNumber: truckNumber ?? assignment.truckNumber,
+        truckId: truckId ?? (assignment.truckId ? String(assignment.truckId) : undefined),
+        // This job is being moved, not stacked: it must not count against the
+        // incoming driver's own queue.
+        excludeBookingId: bookingId,
+      });
+      if (!acquired.ok) {
+        res.status(acquired.message === "Driver not found" ? 404 : 400).json({ message: acquired.message });
+        return;
+      }
+
+      // Release only once the new driver has taken it, so a rejected handover
+      // leaves the outgoing driver exactly as they were.
+      await releaseBookingFromDriver(previousDriverId, bookingId);
+
+      updateFields.queueStatus = acquired.queueStatus;
+      updateFields.sequence = acquired.sequence;
+      closedOnAssign = acquired.closedOnAssign;
+    }
+
+    const updated = await Assignment.findOneAndUpdate(
       { bookingId },
       updateFields,
       { new: true }
     );
 
-    if (!assignment) {
-      res.status(404).json({ message: "Assignment not found" });
-      return;
+    if (isHandover) {
+      if (closedOnAssign) {
+        await promoteNextForDriver(String(driverId));
+      }
+      await Booking.findByIdAndUpdate(bookingId, {
+        $push: {
+          timeline: {
+            title: "Fleet Unit Changed",
+            description: `Reassigned to ${driverName || "another driver"} with Truck ${truckNumber ?? assignment.truckNumber}`,
+            time: new Date(),
+            status: "completed",
+          },
+        },
+      });
     }
 
-    res.status(200).json({ message: "Assignment updated successfully", assignment });
+    res.status(200).json({ message: "Assignment updated successfully", assignment: updated });
   } catch (error: any) {
     next(error);
   }

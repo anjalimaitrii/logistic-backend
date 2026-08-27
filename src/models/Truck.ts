@@ -2,6 +2,12 @@ import mongoose, { Schema, Document } from "mongoose";
 
 export interface ITruck {
   truckId: string;
+  /**
+   * The trailer's own registration. A rig is two separately registered vehicles
+   * — the horse (truckId) pulls it — and the gate or weighbridge may check
+   * either one, so the client is shown both.
+   */
+  trailerNumber?: string;
   vehicleModel: string;
   capacity: number;
   year: string;
@@ -57,6 +63,9 @@ export interface ITruck {
 const TruckSchema: Schema = new Schema(
   {
     truckId: { type: String, required: true, unique: true },
+    // Not required: a rigid truck has no trailer, and the Trakzee import brings
+    // none. Not unique either — a trailer can be re-registered onto another horse.
+    trailerNumber: { type: String, default: "" },
     vehicleModel: { type: String, required: true },
     capacity: { type: Number },
     year: { type: String },

@@ -1,10 +1,14 @@
 import express from "express";
-import { createCompany, getCompanies, addClientsToCompany } from "../controllers/companyController.js";
+import { createCompany, getCompanies, addClientsToCompany, getCompanyUsage, deleteCompany } from "../controllers/companyController.js";
 
 const router = express.Router();
 
 router.post("/", createCompany);
 router.get("/", getCompanies);
 router.post("/:id/clients", addClientsToCompany);
+// What a delete would take with it, so the confirmation can name it.
+router.get("/:id/usage", getCompanyUsage);
+// Removes the company AND the client accounts under it.
+router.delete("/:id", deleteCompany);
 
 export default router;

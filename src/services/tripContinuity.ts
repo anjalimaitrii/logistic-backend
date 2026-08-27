@@ -7,6 +7,7 @@ import TripGap from "../models/TripGap.js";
 import { locationLabel, hasEmptyInterval } from "../lib/gapDetection.js";
 import { isCargoDone } from "../lib/tripStatus.js";
 import { closesOnAssign } from "../lib/assignmentClose.js";
+import { restoredTripStatus } from "../lib/reassignment.js";
 import { getFreshVehiclePosition } from "../controllers/liveTrackingController.js";
 import { fileCompletedBooking } from "./completionRecords.js";
 
@@ -58,6 +59,9 @@ export async function retargetRunningTrip(opts: {
         source: "reassignment",
         fromBookingId: nextBooking._id,
         setAt: new Date(),
+        // Stamped so undoRetarget can put the trip back where it was if ops
+        // swaps the fleet unit on the job that caused this diversion.
+        prevTripStatus: runningBooking.tripStatus,
       },
       // Cargo is off but the truck still has ground to cover, and it is not
       // heading for the yard — it is running empty to another job's pickup.
@@ -154,6 +158,93 @@ export async function retargetRunningTrip(opts: {
   }
 
   return { closedImmediately: closeNow };
+}
+
+/**
+ * Reverse of retargetRunningTrip, for when the job that caused the diversion
+ * stops being this driver's next job — handed to another fleet unit, or
+ * cancelled outright.
+ *
+ * The predecessor was made to end at this job's pickup — a place its truck now
+ * has no reason to go. Left in place it would sit at "repositioning" forever,
+ * ending at a point nothing will ever reach, and the empty leg between them
+ * would still be on the accountant's desk.
+ *
+ * A gap the accountant has already claimed is NOT deleted: a settlement's
+ * extraLegs point at that row by id, and stranding an entered figure is worse
+ * than leaving one stale row. It is logged for a human instead.
+ *
+ * Returns the restored predecessor so the caller can derive the driver's status
+ * from it, or null when this job never displaced anything.
+ */
+export async function undoRetarget(nextBookingId: string): Promise<any | null> {
+  const predecessor = await Booking.findOne({
+    "lastPoint.fromBookingId": nextBookingId,
+    "lastPoint.source": "reassignment",
+    tripStatus: { $nin: ["completed", "delivered"] },
+  });
+  if (!predecessor) return null;
+
+  const restore = restoredTripStatus(
+    predecessor.tripStatus,
+    (predecessor.lastPoint as any)?.prevTripStatus
+  );
+  const divertedTo = predecessor.lastPoint?.label || "the next job's pickup";
+
+  const updated = await Booking.findByIdAndUpdate(
+    predecessor._id,
+    {
+      $unset: { lastPoint: "" },
+      ...(restore ? { $set: { tripStatus: restore } } : {}),
+      $push: {
+        timeline: {
+          title: "Diversion Cancelled",
+          description: `The job queued behind this trip is no longer running behind it — this trip no longer ends at ${divertedTo}`,
+          time: new Date(),
+          status: "completed",
+        },
+      },
+    },
+    { new: true }
+  );
+
+  // The empty leg no longer exists: there is no next job for this truck to run
+  // to. Drop it only while it is still untouched.
+  const gap = await TripGap.findOne({
+    prevBookingId: predecessor._id,
+    nextBookingId,
+  }).select("status").lean();
+  if (gap) {
+    if (String(gap.status) === "unattributed") {
+      await TripGap.deleteOne({ _id: (gap as any)._id });
+    } else {
+      // Already claimed onto a settlement, whose extraLegs point at this row by
+      // id. Deleting it would strand that leg, so it stays and is logged for a
+      // human to unpick.
+      console.warn(
+        `[TripContinuity] Gap ${String((gap as any)._id)} was already claimed; reassignment left it in place.`
+      );
+    }
+  }
+
+  // The original diversion wrote an amendment; the reversal gets its own line
+  // rather than erasing it.
+  await Settlement.updateOne(
+    { bookingId: predecessor._id },
+    {
+      $push: {
+        amendments: {
+          reason: "Diversion reversed — the job queued behind this trip is no longer running behind it",
+          field: "lastPoint",
+          before: divertedTo,
+          after: "restored",
+          triggeredAt: new Date(),
+        },
+      },
+    }
+  );
+
+  return updated;
 }
 
 /**

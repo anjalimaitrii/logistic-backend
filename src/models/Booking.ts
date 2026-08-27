@@ -36,6 +36,9 @@ export interface IBooking extends Document {
   deliveryOrders?: string[];
   damages?: Array<{ quantity: string; amount: number }>;
   attachments?: Array<{ name: string; url: string; size?: number; type?: string }>;
+  // The ZRA (tax authority) invoice number printed on the client invoice. Issued
+  // outside this system, so it is typed in when the invoice is raised.
+  zraInvoiceNo?: string;
   status: string;
   statusBeforePaid?: string; // status prior to being auto-marked "paid" by a ledger payment
   tripStatus?: string;
@@ -60,6 +63,9 @@ export interface IBooking extends Document {
     source: "warehouse" | "reassignment";
     fromBookingId?: mongoose.Types.ObjectId;
     setAt: Date;
+    // What tripStatus this trip held before it was diverted. Kept so undoing a
+    // reassignment can put it back rather than guess.
+    prevTripStatus?: string;
   };
   tollAmount?: number; // sum of eToll sheet entries matched to this trip (auto-synced)
   tripStats?: any; // cached Trakzee GPS travel summary (last fetched)
@@ -70,7 +76,11 @@ export interface IBooking extends Document {
     source: string;
     createdAt: Date;
     isSecret?: boolean;
+    // Names as they stood when the booking was made. Kept because the accounts
+    // they came from can be deleted, and a past trip must still say who it was
+    // for — the reference alone goes blank.
     client?: string;
+    company?: string;
     referenceId?: string;
     advancePaid?: string;
   };
@@ -129,6 +139,7 @@ const BookingSchema: Schema = new Schema(
       }],
       default: [],
     },
+    zraInvoiceNo: { type: String, default: "" },
     status: { type: String, default: "pending" },
     statusBeforePaid: { type: String },
     tripStatus: { type: String },
@@ -154,10 +165,12 @@ const BookingSchema: Schema = new Schema(
     tripStartedAt: { type: Date },
     tripEndedAt:   { type: Date },
     lastPoint: {
-      label:         { type: String },
-      source:        { type: String, enum: ["warehouse", "reassignment"] },
-      fromBookingId: { type: Schema.Types.ObjectId, ref: "Booking" },
-      setAt:         { type: Date },
+      label:          { type: String },
+      source:         { type: String, enum: ["warehouse", "reassignment"] },
+      fromBookingId:  { type: Schema.Types.ObjectId, ref: "Booking" },
+      setAt:          { type: Date },
+      // The status the trip was diverted FROM, so the diversion can be undone.
+      prevTripStatus: { type: String },
     },
     tollAmount:    { type: Number, default: 0 }, // sum of matched eToll sheet entries (auto-synced)
     tripStats:          { type: Schema.Types.Mixed, default: null },
@@ -169,6 +182,7 @@ const BookingSchema: Schema = new Schema(
       createdAt:   { type: Date, default: Date.now },
       isSecret:    { type: Boolean },
       client:      { type: String },
+      company:     { type: String },
       referenceId: { type: String },
       advancePaid: { type: String },
     },

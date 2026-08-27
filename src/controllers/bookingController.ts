@@ -9,6 +9,8 @@ import { isFinalLeg, isCargoDone, driverStatusFor } from "../lib/tripStatus.js";
 import { locationLabel } from "../lib/gapDetection.js";
 import { upsertReturnLeg } from "../lib/returnLeg.js";
 import { computeLegTotals } from "../lib/legTotals.js";
+import { editsBookingDetails } from "../lib/bookingLock.js";
+import { fleetSummaryFor } from "../lib/fleetSummary.js";
 import Settlement from "../models/Settlement.js";
 import Assignment from "../models/Assignment.js";
 import Driver from "../models/Driver.js";
@@ -62,6 +64,26 @@ export const createBooking = async (req: Request, res: Response, next: NextFunct
       isSecret: isSecret ?? false,
       withTax: withTax ?? true,
     };
+
+    // Stamp who this was booked for, here rather than in the forms. The admin
+    // drawer sent the client name and the client-side form did not, so half the
+    // bookings had no name to fall back on once the account behind them was
+    // deleted. Doing it server-side means every booking carries it, whichever
+    // form made it. Whatever the caller sent wins — it may name a person the
+    // account record does not.
+    if (effectiveClientId) {
+      const bookedFor = await Client.findById(effectiveClientId)
+        .select("name company")
+        .populate("company", "companyName")
+        .lean();
+      if (bookedFor) {
+        bookingData.metadata = {
+          ...(bookingData.metadata || {}),
+          client: (bookingData.metadata?.client) || (bookedFor as any).name || "",
+          company: (bookingData.metadata?.company) || (bookedFor as any).company?.companyName || "",
+        };
+      }
+    }
 
     if (Array.isArray(pickupLocations) && pickupLocations.length > 0) {
       bookingData.pickupLocations = pickupLocations;
@@ -169,16 +191,107 @@ export const getBookings = async (req: Request, res: Response, next: NextFunctio
         select: "name email contact company",
         populate: {
           path: "company",
-          select: "companyName cinNumber"
+          select: "companyName tpinNumber"
         }
       })
       .sort({ createdAt: -1 });
 
-    res.status(200).json(bookings);
+    res.status(200).json(await withFleet(bookings));
   } catch (error: any) {
     next(error);
   }
 };
+
+/**
+ * Fill in a driver or truck whose id no longer resolves.
+ *
+ * An assignment stores the driver's name and the truck's plate as well as their
+ * ids. That redundancy is what saves it here: clearing the drivers and trucks
+ * collections and re-importing from Trakzee mints fresh ids, so every past
+ * assignment is left pointing at records that no longer exist. The trip still
+ * knows WHO and WHICH TRUCK — it just cannot reach their details.
+ *
+ * The plate is unique, so a truck resolves exactly. A driver name is not unique
+ * on its own — this fleet has two Fenwell Lungus — so it is matched together
+ * with the truck, the same pair the drivers collection is keyed on.
+ */
+async function relinkByName(assignments: any[]): Promise<void> {
+  const orphanTruck = assignments.filter((a) => a.truckNumber && !a.truckId);
+  const orphanDriver = assignments.filter((a) => a.driverName && !a.driverId);
+  if (!orphanTruck.length && !orphanDriver.length) return;
+
+  const Truck = (await import("../models/Truck.js")).default;
+  const Driver = (await import("../models/Driver.js")).default;
+  const { driverDedupeKey } = await import("../lib/driverKey.js");
+
+  // Plates first: a driver is identified by name AND truck, so the truck has to
+  // be known before the driver can be looked up.
+  if (orphanTruck.length) {
+    const plates = [...new Set(orphanTruck.map((a) => a.truckNumber))];
+    const found = await Truck.find({ truckId: { $in: plates } })
+      .select("truckId trailerNumber")
+      .lean();
+    const byPlate = new Map(found.map((t: any) => [t.truckId, t]));
+    for (const a of orphanTruck) a.truckId = byPlate.get(a.truckNumber) || null;
+  }
+
+  if (orphanDriver.length) {
+    const keys = orphanDriver.map((a) =>
+      driverDedupeKey(a.driverName, (a.truckId as any)?._id)
+    );
+    const found = await Driver.find({ dedupeKey: { $in: [...new Set(keys)] } })
+      .select("name phone nrc dedupeKey")
+      .lean();
+    const byKey = new Map(found.map((d: any) => [d.dedupeKey, d]));
+    orphanDriver.forEach((a, i) => { a.driverId = byKey.get(keys[i]) || null; });
+  }
+}
+
+/**
+ * Attach the carrier, truck and driver to each booking.
+ *
+ * The client app cannot reach this itself — /api/assignments is admin-only — so
+ * the join happens here. Read live rather than copied onto the booking, so a
+ * driver swapped an hour before loading shows the driver who is actually coming.
+ *
+ * fleetSummaryFor whitelists the four fields; nothing else off the assignment or
+ * the driver record travels with it.
+ */
+async function withFleet(bookings: any[]): Promise<any[]> {
+  if (!bookings.length) return [];
+  const Assignment = (await import("../models/Assignment.js")).default;
+
+  // One query for the whole page rather than one per row.
+  //
+  // Completed assignments are included on purpose. A finished trip is exactly
+  // when the client most wants to know which truck and driver delivered it —
+  // filtering them out left every past job with no fleet at all.
+  const assignments = await Assignment.find({
+    bookingId: { $in: bookings.map((b: any) => b._id) },
+  })
+    .select("bookingId truckNumber driverName driverId truckId queueStatus createdAt")
+    .populate("driverId", "name phone nrc")
+    .populate("truckId", "truckId trailerNumber")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  // A booking has one assignment, but if it were ever handed over twice the
+  // running one is the answer, and the newest otherwise.
+  const byBooking = new Map<string, any>();
+  for (const a of assignments as any[]) {
+    const id = String(a.bookingId);
+    const held = byBooking.get(id);
+    if (!held || (held.queueStatus === "completed" && a.queueStatus !== "completed")) {
+      byBooking.set(id, a);
+    }
+  }
+
+  await relinkByName([...byBooking.values()]);
+  return bookings.map((b: any) => ({
+    ...(typeof b.toObject === "function" ? b.toObject() : b),
+    fleet: fleetSummaryFor(byBooking.get(String(b._id))),
+  }));
+}
 
 export const getBookingById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -190,7 +303,8 @@ export const getBookingById = async (req: Request, res: Response, next: NextFunc
       return;
     }
 
-    res.status(200).json(booking);
+    const [withFleetAttached] = await withFleet([booking]);
+    res.status(200).json(withFleetAttached);
   } catch (error: any) {
     next(error);
   }
@@ -229,6 +343,19 @@ export const cancelBooking = async (req: Request, res: Response, next: NextFunct
     const Settlement = (await import("../models/Settlement.js")).default;
     const TripGap = (await import("../models/TripGap.js")).default;
     const Driver = (await import("../models/Driver.js")).default;
+
+    // Read who was driving BEFORE the assignment goes: it is the only record of
+    // it. Cancelling used to delete every trace of the job and leave the driver
+    // marked on_trip holding nothing — and nothing frees a driver in that state,
+    // because the getDrivers sync only walks drivers that still have an active
+    // assignment. They stayed ON TRIP on the assignment board forever.
+    const cancelledAssignment = await Assignment.findOne({ bookingId: id })
+      .select("driverId")
+      .lean();
+    const strandedDriverId = (cancelledAssignment as any)?.driverId
+      ? String((cancelledAssignment as any).driverId)
+      : "";
+
     await Assignment.deleteMany({ bookingId: id });
     await Settlement.deleteMany({ bookingId: id });
     // A gap references two bookings. Deleting one of them would leave a gap that
@@ -236,6 +363,27 @@ export const cancelBooking = async (req: Request, res: Response, next: NextFunct
     // repair path — and would block the surviving trip's approval forever.
     await TripGap.deleteMany({ $or: [{ prevBookingId: id }, { nextBookingId: id }] });
     await Driver.updateMany({ tripQueue: id } as any, { $pull: { tripQueue: id } } as any);
+
+    if (strandedDriverId) {
+      // Puts the driver back into whatever their REMAINING work says, and undoes
+      // the diversion this job caused if it caused one — a trip retargeted to end
+      // at a cancelled job's pickup would otherwise sit at "repositioning"
+      // pointing at a booking that no longer exists.
+      const { releaseBookingFromDriver } = await import("../services/assignmentTransfer.js");
+      await releaseBookingFromDriver(strandedDriverId, String(id));
+
+      // The cancelled job may have had a successor queued behind it. Nothing
+      // polls for queued assignments, so without this it would never start.
+      const stillQueued = await Assignment.countDocuments({
+        driverId: strandedDriverId,
+        queueStatus: "queued",
+      });
+      if (stillQueued > 0) {
+        const { promoteNextForDriver } = await import("../services/tripContinuity.js");
+        await promoteNextForDriver(strandedDriverId);
+      }
+    }
+
     await Booking.findByIdAndDelete(id);
 
     res.json({ message: "Booking cancelled and removed" });
@@ -420,6 +568,21 @@ export const updateBooking = async (req: Request, res: Response, next: NextFunct
   try {
     const { id } = req.params;
     const updateData = req.body;
+
+    // Route, load and client are settled once a truck is committed to the job —
+    // that truck was chosen for this route and costed against this load. The
+    // price, advance and invoice number stay editable, because those are entered
+    // while the trip runs; see editsBookingDetails for why the lock is on the
+    // fields rather than on the endpoint.
+    if (editsBookingDetails(updateData)) {
+      const assigned = await Assignment.exists({ bookingId: id });
+      if (assigned) {
+        res.status(409).json({
+          message: "A driver is already assigned to this booking — its route and cargo can no longer be changed.",
+        });
+        return;
+      }
+    }
 
     const updatedBooking = await Booking.findByIdAndUpdate(
       id,

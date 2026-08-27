@@ -4,6 +4,7 @@ import Company from "../models/Company.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { sendClientWelcomeEmail, sendOTPEmail } from "../services/emailService.js";
+import { totalClientRecords, describeClientUsage } from "../lib/clientUsage.js";
 
 // In-memory OTP store: email → { otp, expiresAt }
 const otpStore = new Map<string, { otp: string; expiresAt: number }>();
@@ -268,3 +269,109 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     next(error);
   }
 };
+
+/**
+ * What deleting this client would detach.
+ *
+ * Read before the confirmation so the operator is told the actual numbers rather
+ * than a generic warning — "4 bookings and 3 invoices" is a decision they can
+ * make; "are you sure?" is not.
+ */
+export const getClientUsage = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const client = await Client.findById(id).select("_id name").lean();
+    if (!client) {
+      res.status(404).json({ message: "Client not found" });
+      return;
+    }
+
+    const [Booking, Invoice, Payment, Cash] = await Promise.all([
+      import("../models/Booking.js").then(m => m.default),
+      import("../models/Invoice.js").then(m => m.default),
+      import("../models/Payment.js").then(m => m.default),
+      import("../models/Cash.js").then(m => m.default),
+    ]);
+
+    const [bookings, invoices, payments, cash] = await Promise.all([
+      Booking.countDocuments({ clientId: id }),
+      Invoice.countDocuments({ clientId: id }),
+      Payment.countDocuments({ clientId: id }),
+      Cash.countDocuments({ clientId: id }),
+    ]);
+
+    const usage = { bookings, invoices, payments, cash };
+    res.status(200).json({
+      clientName: (client as any).name,
+      ...usage,
+      total: totalClientRecords(usage),
+      summary: describeClientUsage(usage),
+    });
+  } catch (error: any) {
+    next(error);
+  }
+};
+
+/**
+ * Remove the client account.
+ *
+ * Their trade is deliberately left alone. A booking or an invoice is a record of
+ * something that happened, and deleting it to tidy up a directory would be
+ * destroying history — so the documents stay and simply lose the name, reading
+ * as "Direct Client" wherever they are shown. That is not reversible, which is
+ * why getClientUsage exists.
+ */
+export const deleteClient = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const client = await Client.findById(id).populate("company", "companyName");
+    if (!client) {
+      res.status(404).json({ message: "Client not found" });
+      return;
+    }
+
+    await stampClientNameOnBookings(client);
+    await Client.findByIdAndDelete(id);
+    // The company keeps a list of its people; leaving the id behind would show
+    // an empty row in the directory.
+    await Company.updateMany({ clients: id }, { $pull: { clients: id } });
+
+    res.status(200).json({ message: `${client.name} removed.` });
+  } catch (error: any) {
+    next(error);
+  }
+};
+
+/**
+ * Write the names onto this client's bookings before the account goes.
+ *
+ * A trip that was run for Utkarsh was run for Utkarsh — the account being closed
+ * afterwards does not change that, and a past job reading "Direct Client" is
+ * simply wrong. Only fills what is blank, so a name typed for this specific
+ * booking is never overwritten by the account's.
+ */
+async function stampClientNameOnBookings(client: any): Promise<void> {
+  const name = client?.name || "";
+  const company = (client?.company as any)?.companyName || "";
+  if (!name && !company) return;
+
+  const Booking = (await import("../models/Booking.js")).default;
+  const blank = (field: string) => ({
+    $or: [{ [field]: { $in: ["", null] } }, { [field]: { $exists: false } }],
+  });
+
+  if (name) {
+    await Booking.updateMany(
+      { clientId: client._id, ...blank("metadata.client") },
+      { $set: { "metadata.client": name } }
+    );
+  }
+  if (company) {
+    await Booking.updateMany(
+      { clientId: client._id, ...blank("metadata.company") },
+      { $set: { "metadata.company": company } }
+    );
+  }
+}
+
+export { stampClientNameOnBookings };

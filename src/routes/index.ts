@@ -11,6 +11,7 @@ import liveTrackingRoutes from "./liveTrackingRoutes.js";
 import travelSummaryRoutes from "./travelSummaryRoutes.js";
 import tollRoutes from "./tollRoutes.js";
 import goodsTypeRoutes from "./goodsTypeRoutes.js";
+import locationRoutes from "./locationRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
 import chatRoutes from "./chatRoutes.js";
 import routeRoutes from "./routeRoutes.js";
@@ -40,6 +41,8 @@ export function registerRoutes(app: Application): void {
   // ── Any logged-in user (admin or client) ──────────────────────────────────
   app.use("/api/bookings", loggedIn, bookingRoutes);
   app.use("/api/goods-types", loggedIn, goodsTypeRoutes);
+  // Clients book too, and their form has the same cascade.
+  app.use("/api/locations", loggedIn, locationRoutes);
   app.use("/api/routes", loggedIn, routeRoutes);
   app.use("/api/notifications", loggedIn, notificationRoutes);
   app.use("/api/chat", loggedIn, chatRoutes);

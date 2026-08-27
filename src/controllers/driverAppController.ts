@@ -47,7 +47,6 @@ export const loginDriver = async (req: AuthedRequest, res: Response, next: NextF
         name: driver.name,
         phone: driver.phone,
         email: driver.email,
-        licenseNo: driver.licenseNo,
         driverStatus: driver.driverStatus
       }
     });
