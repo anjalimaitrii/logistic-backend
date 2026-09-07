@@ -9,7 +9,6 @@ import { isFinalLeg, isCargoDone, driverStatusFor } from "../lib/tripStatus.js";
 import { locationLabel } from "../lib/gapDetection.js";
 import { upsertReturnLeg } from "../lib/returnLeg.js";
 import { computeLegTotals } from "../lib/legTotals.js";
-import { editsBookingDetails } from "../lib/bookingLock.js";
 import { fleetSummaryFor } from "../lib/fleetSummary.js";
 import Settlement from "../models/Settlement.js";
 import Assignment from "../models/Assignment.js";
@@ -569,20 +568,9 @@ export const updateBooking = async (req: Request, res: Response, next: NextFunct
     const { id } = req.params;
     const updateData = req.body;
 
-    // Route, load and client are settled once a truck is committed to the job —
-    // that truck was chosen for this route and costed against this load. The
-    // price, advance and invoice number stay editable, because those are entered
-    // while the trip runs; see editsBookingDetails for why the lock is on the
-    // fields rather than on the endpoint.
-    if (editsBookingDetails(updateData)) {
-      const assigned = await Assignment.exists({ bookingId: id });
-      if (assigned) {
-        res.status(409).json({
-          message: "A driver is already assigned to this booking — its route and cargo can no longer be changed.",
-        });
-        return;
-      }
-    }
+    // Ops keep full control of a booking for its whole life: route, load and
+    // client stay editable even after a truck is committed, because real jobs
+    // change after assignment and ops must be able to correct them in place.
 
     const updatedBooking = await Booking.findByIdAndUpdate(
       id,
