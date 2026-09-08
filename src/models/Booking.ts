@@ -32,6 +32,8 @@ export interface IBooking extends Document {
   };
   finalAmount?: number;
   advancePaid?: number;
+  /** What finalAmount and advancePaid are denominated in. See the schema note. */
+  currency?: "ZMW" | "USD";
   specialRequest?: string;
   deliveryOrders?: string[];
   damages?: Array<{ quantity: string; amount: number }>;
@@ -121,6 +123,12 @@ const BookingSchema: Schema = new Schema(
     },
     finalAmount: { type: Number },
     advancePaid: { type: Number },
+    // The fleet runs in Zambia, so a deal is in Kwacha unless it is a cross-border
+    // job — those are agreed in dollars. Stored per booking rather than inferred
+    // from the route, because the two do not always follow each other, and every
+    // screen that renders an amount needs to know which symbol to put in front of
+    // it. Existing bookings have no value and read as ZMW, which is what they were.
+    currency: { type: String, enum: ["ZMW", "USD"], default: "ZMW" },
     specialRequest: { type: String },
     deliveryOrders: { type: [String], default: [] },
     damages: [

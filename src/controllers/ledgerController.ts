@@ -2,6 +2,10 @@ import { Request, Response, NextFunction } from "express";
 import Booking from "../models/Booking.js";
 import Payment from "../models/Payment.js";
 import Client from "../models/Client.js";
+import { planAllocation, type Currency } from "../lib/paymentAllocation.js";
+
+/** Anything that is not an explicit "USD" is Kwacha — including a blank body. */
+const asCurrency = (v: unknown): Currency => (v === "USD" ? "USD" : "ZMW");
 
 // Secret, off-the-books (without-tax) jobs must never appear in client ledgers —
 // excluded from both the booking list and the billed/outstanding totals.
@@ -27,7 +31,7 @@ export const getCompanyLedger = async (req: Request, res: Response, next: NextFu
 
     // All bookings for those clients
     const bookings = await Booking.find({ clientId: { $in: clientIds }, ...sf })
-      .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
+      .select("tripId clientId finalAmount advancePaid currency status tripStatus pickupLocations dropoffLocations metadata createdAt")
       .populate("clientId", "name")
       .sort({ createdAt: -1 });
 
@@ -54,7 +58,7 @@ export const getClientLedger = async (req: Request, res: Response, next: NextFun
     const sf = secretFilter(wantsSecret(req.query.includeSecret));
 
     const bookings = await Booking.find({ clientId, ...sf })
-      .select("tripId clientId finalAmount advancePaid status tripStatus pickupLocations dropoffLocations metadata createdAt")
+      .select("tripId clientId finalAmount advancePaid currency status tripStatus pickupLocations dropoffLocations metadata createdAt")
       .populate("clientId", "name")
       .sort({ createdAt: -1 });
 
@@ -75,16 +79,21 @@ export const getClientLedger = async (req: Request, res: Response, next: NextFun
 
 // FIFO allocation — bookings must already be sorted oldest-first by caller.
 // Returns the per-booking distribution so the payment can be reversed on delete.
-async function allocateFIFO(bookings: any[], amount: number): Promise<Array<{ bookingId: any; amount: number }>> {
-  let remaining = amount;
-  const allocations: Array<{ bookingId: any; amount: number }> = [];
-  const unpaid = bookings.filter((b: any) => (b.finalAmount || 0) > (b.advancePaid || 0));
+// Which invoices are eligible, and for how much, is decided by planAllocation
+// (pure and tested, lib/paymentAllocation) — including the currency match that
+// keeps a dollar payment off a Kwacha invoice. This function only writes.
+async function allocateFIFO(
+  bookings: any[],
+  amount: number,
+  currency: Currency
+): Promise<Array<{ bookingId: any; amount: number }>> {
+  const { allocations } = planAllocation(bookings, amount, currency);
+  const byId = new Map(bookings.map((b: any) => [String(b._id), b]));
 
-  for (const booking of unpaid) {
-    if (remaining <= 0) break;
-    const due = (booking.finalAmount || 0) - (booking.advancePaid || 0);
-    const applied = Math.min(remaining, due);
-    if (remaining >= due) {
+  for (const alloc of allocations) {
+    const booking: any = byId.get(String(alloc.bookingId));
+    if (!booking) continue;
+    if (alloc.settles) {
       // Fully settled — mark paid, remembering the status we're overwriting
       await Booking.findByIdAndUpdate(booking._id, {
         advancePaid: booking.finalAmount,
@@ -92,19 +101,17 @@ async function allocateFIFO(bookings: any[], amount: number): Promise<Array<{ bo
         ...(booking.status !== "paid" ? { statusBeforePaid: booking.status } : {}),
       });
     } else {
-      await Booking.findByIdAndUpdate(booking._id, { advancePaid: (booking.advancePaid || 0) + remaining });
+      await Booking.findByIdAndUpdate(booking._id, { advancePaid: (booking.advancePaid || 0) + alloc.amount });
     }
-    allocations.push({ bookingId: booking._id, amount: applied });
-    remaining -= applied;
   }
-  return allocations;
+  return allocations.map((a) => ({ bookingId: a.bookingId, amount: a.amount }));
 }
 
 // Reverse a payment's allocation: subtract each allocated amount back off the
 // booking and, if it drops below the billed total, un-mark it as "paid".
 async function reverseAllocations(allocations: Array<{ bookingId: any; amount: number }>): Promise<void> {
   for (const alloc of allocations) {
-    const b: any = await Booking.findById(alloc.bookingId).select("finalAmount advancePaid status statusBeforePaid");
+    const b: any = await Booking.findById(alloc.bookingId).select("finalAmount advancePaid currency status statusBeforePaid");
     if (!b) continue;
     const newAdvance = Math.max(0, (b.advancePaid || 0) - (alloc.amount || 0));
     const update: any = { advancePaid: newAdvance };
@@ -118,13 +125,16 @@ async function reverseAllocations(allocations: Array<{ bookingId: any; amount: n
 
 // Legacy fallback for payments saved before allocations were tracked: unwind the
 // amount newest-booking-first (mirror of FIFO) across the payer's bookings.
-async function reverseFIFOByAmount(bookingFilter: any, amount: number): Promise<void> {
+// Currency-matched like the forward path, so undoing a payment cannot pull money
+// off an invoice it was never able to settle in the first place.
+async function reverseFIFOByAmount(bookingFilter: any, amount: number, currency: Currency): Promise<void> {
   let remaining = amount;
   const bookings: any[] = await Booking.find(bookingFilter)
-    .select("_id finalAmount advancePaid status statusBeforePaid createdAt")
+    .select("_id finalAmount advancePaid currency status statusBeforePaid createdAt")
     .sort({ createdAt: -1 });
   for (const b of bookings) {
     if (remaining <= 0) break;
+    if ((b.currency === "USD" ? "USD" : "ZMW") !== currency) continue;
     const paid = b.advancePaid || 0;
     if (paid <= 0) continue;
     const take = Math.min(paid, remaining);
@@ -143,11 +153,12 @@ async function reverseFIFOByAmount(bookingFilter: any, amount: number): Promise<
 export const addCompanyPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const companyId = String(req.params.companyId);
-    const { amount, note, paidAt, includeSecret } = req.body;
+    const { amount, note, paidAt, includeSecret, currency } = req.body;
     if (!amount || Number(amount) <= 0) { res.status(400).json({ message: "Valid amount required" }); return; }
 
     // Save payment record
-    const payment = await Payment.create({ companyId, amount: Number(amount), note: note || "", paidAt: paidAt ? new Date(paidAt) : new Date() });
+    const paidIn = asCurrency(currency);
+    const payment = await Payment.create({ companyId, amount: Number(amount), currency: paidIn, note: note || "", paidAt: paidAt ? new Date(paidAt) : new Date() });
 
     // FIFO allocation across company's bookings
     const sf = secretFilter(wantsSecret(includeSecret));
@@ -155,9 +166,9 @@ export const addCompanyPayment = async (req: Request, res: Response, next: NextF
     const clientIds = clients.map((c: any) => c._id);
     // sort: 1 = ascending = oldest first (FIFO)
     const bookings = await Booking.find({ clientId: { $in: clientIds }, ...sf })
-      .select("_id finalAmount advancePaid status createdAt")
+      .select("_id finalAmount advancePaid currency status createdAt")
       .sort({ createdAt: 1 });
-    const allocations = await allocateFIFO(bookings, Number(amount));
+    const allocations = await allocateFIFO(bookings, Number(amount), paidIn);
     payment.allocations = allocations as any;
     await payment.save();
 
@@ -169,17 +180,18 @@ export const addCompanyPayment = async (req: Request, res: Response, next: NextF
 export const addClientPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const clientId = String(req.params.clientId);
-    const { amount, note, paidAt, includeSecret } = req.body;
+    const { amount, note, paidAt, includeSecret, currency } = req.body;
     if (!amount || Number(amount) <= 0) { res.status(400).json({ message: "Valid amount required" }); return; }
 
-    const payment = await Payment.create({ clientId, amount: Number(amount), note: note || "", paidAt: paidAt ? new Date(paidAt) : new Date() });
+    const paidIn = asCurrency(currency);
+    const payment = await Payment.create({ clientId, amount: Number(amount), currency: paidIn, note: note || "", paidAt: paidAt ? new Date(paidAt) : new Date() });
 
     // sort: 1 = ascending = oldest first (FIFO)
     const sf = secretFilter(wantsSecret(includeSecret));
     const bookings = await Booking.find({ clientId, ...sf })
-      .select("_id finalAmount advancePaid status createdAt")
+      .select("_id finalAmount advancePaid currency status createdAt")
       .sort({ createdAt: 1 });
-    const allocations = await allocateFIFO(bookings, Number(amount));
+    const allocations = await allocateFIFO(bookings, Number(amount), paidIn);
     payment.allocations = allocations as any;
     await payment.save();
 
@@ -212,7 +224,7 @@ export const deletePayment = async (req: Request, res: Response, next: NextFunct
       const filter = payment.companyId
         ? { clientId: { $in: (await Client.find({ company: payment.companyId }).select("_id")).map((c: any) => c._id) }, ...EXCLUDE_SECRET }
         : { clientId: payment.clientId, ...EXCLUDE_SECRET };
-      await reverseFIFOByAmount(filter, payment.amount || 0);
+      await reverseFIFOByAmount(filter, payment.amount || 0, asCurrency((payment as any).currency));
     }
 
     await Payment.findByIdAndDelete(req.params.paymentId);

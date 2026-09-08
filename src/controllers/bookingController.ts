@@ -392,7 +392,7 @@ export const cancelBooking = async (req: Request, res: Response, next: NextFunct
 export const updateBookingStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { status, tripStatus, finalAmount, advancePaid, specialRequest, assignment, tripStartCoords, tripEndCoords, deliveryOrders, damages, attachments } = req.body;
+    const { status, tripStatus, finalAmount, advancePaid, currency, specialRequest, assignment, tripStartCoords, tripEndCoords, deliveryOrders, damages, attachments } = req.body;
 
     const updateData: any = {};
     if (status) updateData.status = status;
@@ -424,6 +424,7 @@ export const updateBookingStatus = async (req: Request, res: Response, next: Nex
     }
     if (finalAmount !== undefined) updateData.finalAmount = finalAmount;
     if (advancePaid !== undefined) updateData.advancePaid = advancePaid;
+    if (currency !== undefined) updateData.currency = currency;
     if (specialRequest !== undefined) updateData.specialRequest = specialRequest;
     if (assignment !== undefined) updateData.assignment = assignment;
 

@@ -11,8 +11,12 @@ export interface ISettlement extends Document {
       loadType: "loaded" | "unloaded";
       liters: number;
       amount: number;
+      /** Diesel bought across the border. Zero on a domestic leg. */
+      amountUsd?: number;
     }>;
     fuelRate: number;
+    /** Per-litre price on the far side of the border. Zero when none was bought. */
+    fuelRateUsd?: number;
     totalDistance: number;
     totalLiters: number;
   };
@@ -30,6 +34,7 @@ export interface ISettlement extends Document {
     mileage: number;
     liters: number;
     amount: number;
+    amountUsd?: number;
     gapId?: mongoose.Types.ObjectId;
     addedBy: string;
     addedAt: Date;
@@ -51,21 +56,36 @@ export interface ISettlement extends Document {
   expenses: Array<{
     description: string;
     amount: number;
+    amountUsd?: number;
     category: string;
     date: string;
   }>;
+  // A cross-border trip pays out in two currencies, so every figure has a
+  // parallel ...Usd sibling. They are tracked side by side and never added: no
+  // exchange rate is stored anywhere, and one that moved would silently rewrite
+  // settlements that were already signed off. A settlement written before this
+  // existed has no Usd values, reads as zero, and is Kwacha-only — which is what
+  // it was.
   financials: {
     // Actual values entered/approved by the accountant
     cashAllocation: number;
+    cashAllocationUsd?: number;
     fuelTotal: number;
+    fuelTotalUsd?: number;
     councilLevy: number;
+    councilLevyUsd?: number;
     tollAmount: number; // NOT part of driver's allocation
+    tollAmountUsd?: number;
     // Route Master values at approval time — kept alongside actuals for comparison
     assumeCashAllocation: number;
+    assumeCashAllocationUsd?: number;
     assumeCouncilLevy: number;
+    assumeCouncilLevyUsd?: number;
     assumeTollAmount: number;
+    assumeTollAmountUsd?: number;
   };
   tollAmount?: number;
+  tollAmountUsd?: number;
   status: string;
 }
 
@@ -83,10 +103,12 @@ const SettlementSchema: Schema = new Schema(
           // to extraLegs, "the last leg is the unloaded one" stops being true.
           loadType: { type: String, enum: ["loaded", "unloaded"], default: "loaded" },
           liters: { type: Number, default: 0 },
-          amount: { type: Number, default: 0 }
+          amount: { type: Number, default: 0 },
+          amountUsd: { type: Number, default: 0 }
         }
       ],
       fuelRate: { type: Number, default: 0 },
+      fuelRateUsd: { type: Number, default: 0 },
       totalDistance: { type: Number, default: 0 },
       totalLiters: { type: Number, default: 0 }
     },
@@ -98,8 +120,9 @@ const SettlementSchema: Schema = new Schema(
         to:       { type: String, default: "" },
         km:       { type: Number, default: 0 },
         mileage:  { type: Number, default: 0 },
-        liters:   { type: Number, default: 0 },
-        amount:   { type: Number, default: 0 },
+        liters:    { type: Number, default: 0 },
+        amount:    { type: Number, default: 0 },
+        amountUsd: { type: Number, default: 0 },
         gapId:    { type: Schema.Types.ObjectId, ref: "TripGap" },
         addedBy:  { type: String, default: "" },
         addedAt:  { type: Date, default: Date.now },
@@ -125,6 +148,7 @@ const SettlementSchema: Schema = new Schema(
       {
         description: { type: String },
         amount: { type: Number },
+        amountUsd: { type: Number, default: 0 },
         category: { type: String },
         date: { type: String }
       }
@@ -132,15 +156,23 @@ const SettlementSchema: Schema = new Schema(
     financials: {
       // actual values entered at approval
       cashAllocation: { type: Number, default: 0 },
+      cashAllocationUsd: { type: Number, default: 0 },
       fuelTotal: { type: Number, default: 0 },
+      fuelTotalUsd: { type: Number, default: 0 },
       councilLevy: { type: Number, default: 0 },
+      councilLevyUsd: { type: Number, default: 0 },
       tollAmount: { type: Number, default: 0 }, // not part of driver's allocation
+      tollAmountUsd: { type: Number, default: 0 },
       // Route Master values at approval time (for actual-vs-assumed comparison)
       assumeCashAllocation: { type: Number, default: 0 },
+      assumeCashAllocationUsd: { type: Number, default: 0 },
       assumeCouncilLevy: { type: Number, default: 0 },
-      assumeTollAmount: { type: Number, default: 0 }
+      assumeCouncilLevyUsd: { type: Number, default: 0 },
+      assumeTollAmount: { type: Number, default: 0 },
+      assumeTollAmountUsd: { type: Number, default: 0 }
     },
     tollAmount: { type: Number, default: 0 },
+    tollAmountUsd: { type: Number, default: 0 },
     status: { type: String, default: "Approved" }
   },
   { timestamps: true }

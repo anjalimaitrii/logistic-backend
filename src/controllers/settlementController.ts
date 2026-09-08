@@ -61,6 +61,9 @@ export const createOrUpdateSettlement = async (req: Request, res: Response, next
       updateData.fuelDetails = {
         legs,
         fuelRate: fuelDetails.fuelRate,
+        // Rebuilt field by field, so anything not named here is dropped — the
+        // cross-border diesel rate has to be listed or it never survives a save.
+        fuelRateUsd: fuelDetails.fuelRateUsd ?? 0,
         totalDistance,
         totalLiters,
       };
