@@ -165,3 +165,67 @@ export const deleteDriver = async (req: Request, res: Response, next: NextFuncti
     next(error);
   }
 };
+
+// Bring the driver roster in line with what Trakzee reports, in ONE place.
+//
+// The browser used to do this and could only ever insert, so a truck whose driver
+// changed kept both people. The decision lives in lib/driverReconcile (pure, and
+// tested); this only applies it and reports what happened, so a failure shows up
+// instead of vanishing into an unread Promise.allSettled the way the licenseNo
+// rejections did for eleven days.
+export const syncTrakzeeDrivers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const vehicles = Array.isArray(req.body?.vehicles) ? req.body.vehicles : null;
+    if (!vehicles) { res.status(400).json({ message: "vehicles[] is required" }); return; }
+
+    const { planDriverSync } = await import("../lib/driverReconcile.js");
+    const Truck = (await import("../models/Truck.js")).default;
+
+    const [trucks, drivers] = await Promise.all([
+      Truck.find().select("truckId").lean(),
+      Driver.find().select("name assignedTruck status").lean(),
+    ]);
+
+    const plan = planDriverSync(vehicles, trucks as any, drivers as any);
+    const errors: string[] = [];
+
+    // Sequential on purpose: the batch is a handful of rows, and one failure must
+    // be attributable to the driver it belongs to rather than lost in a race.
+    const created: string[] = [];
+    for (const c of plan.create) {
+      try {
+        await new Driver({ name: c.name, phone: "--", experience: 0, status: "Active", assignedTruck: c.assignedTruck }).save();
+        created.push(c.name);
+      } catch (err: any) {
+        errors.push(`create "${c.name}": ${err?.message || err}`);
+      }
+    }
+
+    const retired: string[] = [];
+    for (const r of plan.retire) {
+      try {
+        await Driver.findByIdAndUpdate(r._id, { status: "Inactive" });
+        retired.push(`${r.name} (${r.plate})`);
+      } catch (err: any) {
+        errors.push(`retire "${r.name}": ${err?.message || err}`);
+      }
+    }
+
+    const reactivated: string[] = [];
+    for (const r of plan.reactivate) {
+      try {
+        await Driver.findByIdAndUpdate(r._id, { status: "Active" });
+        reactivated.push(`${r.name} (${r.plate})`);
+      } catch (err: any) {
+        errors.push(`reactivate "${r.name}": ${err?.message || err}`);
+      }
+    }
+
+    if (errors.length) console.error("[driver-sync] failures:", errors);
+    if (created.length || retired.length || reactivated.length) {
+      console.log(`[driver-sync] created=${created.length} retired=${retired.length} reactivated=${reactivated.length}`);
+    }
+
+    res.status(200).json({ created, retired, reactivated, errors });
+  } catch (error: any) { next(error); }
+};

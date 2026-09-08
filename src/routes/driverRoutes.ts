@@ -6,11 +6,13 @@ import {
   updateDriver,
   deleteDriver,
   registerDriverCredentials,
+  syncTrakzeeDrivers,
 } from "../controllers/driverController.js";
 
 const router = express.Router();
 
 router.post("/", createDriver);
+router.post("/sync", syncTrakzeeDrivers);
 router.get("/", getDrivers);
 router.get("/:id", getDriverById);
 router.patch("/:id", updateDriver);
