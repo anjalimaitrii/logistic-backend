@@ -567,6 +567,11 @@ export const updateBooking = async (req: Request, res: Response, next: NextFunct
   try {
     const { id } = req.params;
     const updateData = req.body;
+    const before: any = await Booking.findById(id).lean();
+    if (!before) {
+      res.status(404).json({ message: "Booking not found" });
+      return;
+    }
 
     // Ops keep full control of a booking for its whole life: route, load and
     // client stay editable even after a truck is committed, because real jobs
@@ -578,9 +583,20 @@ export const updateBooking = async (req: Request, res: Response, next: NextFunct
       { new: true }
     );
 
-    if (!updatedBooking) {
-      res.status(404).json({ message: "Booking not found" });
-      return;
+    const changes = Object.keys(updateData)
+      .filter((field) => JSON.stringify(before[field]) !== JSON.stringify(updateData[field]))
+      .map((field) => `${field}: ${JSON.stringify(before[field])} -> ${JSON.stringify(updateData[field])}`);
+    if (changes.length) {
+      await Booking.findByIdAndUpdate(id, {
+        $push: {
+          timeline: {
+            title: "Booking Amended",
+            description: changes.join("; "),
+            time: new Date(),
+            status: "completed",
+          },
+        },
+      });
     }
 
     res.status(200).json({
@@ -595,7 +611,7 @@ export const updateBooking = async (req: Request, res: Response, next: NextFunct
 export const changeDropoffAddress = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { id } = req.params;
-    const { newPickup, newDropoff, reason, financials } = req.body;
+    const { newPickup, newDropoff, reason, financials, pickupIndex = 0, dropoffIndex } = req.body;
 
     const booking = await Booking.findById(id);
     if (!booking) {
@@ -603,34 +619,37 @@ export const changeDropoffAddress = async (req: Request, res: Response, next: Ne
       return;
     }
 
-    const currentPickup = booking.pickupLocations?.[0];
-    const currentDropoff = booking.dropoffLocations?.[0];
+    const currentPickup = booking.pickupLocations?.[pickupIndex];
+    const selectedDropoffIndex = Number.isInteger(dropoffIndex)
+      ? dropoffIndex
+      : Math.max(0, (booking.dropoffLocations?.length || 1) - 1);
+    const currentDropoff = booking.dropoffLocations?.[selectedDropoffIndex];
 
     const setData: any = {};
 
     // Handle Pickup Change
     if (newPickup && currentPickup) {
-      setData["pickupLocations.0.contactPerson"] = newPickup.contactPerson || currentPickup.contactPerson;
-      setData["pickupLocations.0.contactNumber"] = newPickup.contactNumber || currentPickup.contactNumber;
-      setData["pickupLocations.0.address.plotNo"] = newPickup.address?.plotNo || "";
-      setData["pickupLocations.0.address.street"] = newPickup.address?.street || "";
-      setData["pickupLocations.0.address.city"] = newPickup.address?.city || "";
-      setData["pickupLocations.0.address.lga"] = (newPickup.address as any)?.lga || "";
+      setData[`pickupLocations.${pickupIndex}.contactPerson`] = newPickup.contactPerson || currentPickup.contactPerson;
+      setData[`pickupLocations.${pickupIndex}.contactNumber`] = newPickup.contactNumber || currentPickup.contactNumber;
+      setData[`pickupLocations.${pickupIndex}.address.plotNo`] = newPickup.address?.plotNo || "";
+      setData[`pickupLocations.${pickupIndex}.address.street`] = newPickup.address?.street || "";
+      setData[`pickupLocations.${pickupIndex}.address.city`] = newPickup.address?.city || "";
+      setData[`pickupLocations.${pickupIndex}.address.lga`] = (newPickup.address as any)?.lga || "";
     }
 
     // Handle Dropoff Change
     if (newDropoff && currentDropoff) {
 
-      setData["dropoffLocations.0.contactPerson"] = newDropoff.contactPerson || currentDropoff.contactPerson;
-      setData["dropoffLocations.0.contactNumber"] = newDropoff.contactNumber || currentDropoff.contactNumber;
-      setData["dropoffLocations.0.address.plotNo"] = newDropoff.address?.plotNo || "";
-      setData["dropoffLocations.0.address.street"] = newDropoff.address?.street || "";
-      setData["dropoffLocations.0.address.city"] = newDropoff.address?.city || "";
-      setData["dropoffLocations.0.address.lga"] = (newDropoff.address as any)?.lga || "";
+      setData[`dropoffLocations.${selectedDropoffIndex}.contactPerson`] = newDropoff.contactPerson || currentDropoff.contactPerson;
+      setData[`dropoffLocations.${selectedDropoffIndex}.contactNumber`] = newDropoff.contactNumber || currentDropoff.contactNumber;
+      setData[`dropoffLocations.${selectedDropoffIndex}.address.plotNo`] = newDropoff.address?.plotNo || "";
+      setData[`dropoffLocations.${selectedDropoffIndex}.address.street`] = newDropoff.address?.street || "";
+      setData[`dropoffLocations.${selectedDropoffIndex}.address.city`] = newDropoff.address?.city || "";
+      setData[`dropoffLocations.${selectedDropoffIndex}.address.lga`] = (newDropoff.address as any)?.lga || "";
     }
 
     // Update finalAmount if provided
-    if (financials?.newFinalAmount) {
+    if (financials?.newFinalAmount !== undefined) {
       setData.finalAmount = financials.newFinalAmount;
     }
 
@@ -641,6 +660,17 @@ export const changeDropoffAddress = async (req: Request, res: Response, next: Ne
       updateQuery,
       { new: true }
     );
+
+    await Booking.findByIdAndUpdate(id, {
+      $push: {
+        timeline: {
+          title: "Booking Amended",
+          description: reason || "Destination or booking financial details corrected",
+          time: new Date(),
+          status: "completed",
+        },
+      },
+    });
 
     // NOTE: this endpoint used to upsert a Settlement carrying pickupKm/dropoffKm.
     // That model assumed every trip has exactly two distances — already wrong for
