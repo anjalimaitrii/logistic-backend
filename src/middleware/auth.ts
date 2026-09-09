@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 
 // req.user is filled in by requireAuth after verifying the login token
 export interface AuthedRequest extends Request {
-  user?: { id?: string; role?: string; email?: string; company?: string };
+  user?: { id?: string; role?: string; email?: string; company?: string; accountType?: string };
 }
 
 // "Who are you?" — must present a valid login token (issued at login).
@@ -16,7 +16,7 @@ export const requireAuth = (req: AuthedRequest, res: Response, next: NextFunctio
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret") as any;
-    req.user = { id: decoded.id, role: decoded.role, email: decoded.email, company: decoded.company };
+    req.user = { id: decoded.id, role: decoded.role, email: decoded.email, company: decoded.company, accountType: decoded.accountType };
     next();
   } catch {
     res.status(401).json({ message: "Session expired or invalid. Please log in again." });

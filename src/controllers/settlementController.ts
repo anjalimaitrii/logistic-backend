@@ -42,6 +42,14 @@ export const createOrUpdateSettlement = async (req: Request, res: Response, next
     // figure moved FROM, and the fuel totals need its stored empty legs.
     const prior: any = await Settlement.findOne({ bookingId }).lean();
 
+    // Employee accounts share the "admin" role (same panel, see loginAdmin) but
+    // must not correct a settlement the accountant has already approved — only
+    // a true admin (accountType) may. Pre-approval edits are untouched.
+    if (prior?.status === "Approved" && (req as any).user?.accountType !== "admin") {
+      res.status(403).json({ message: "Forbidden — only an admin can edit an approved settlement." });
+      return;
+    }
+
     const updateData: any = {};
     if (expenses) updateData.expenses = expenses;
     if (financials) updateData.financials = financials;
