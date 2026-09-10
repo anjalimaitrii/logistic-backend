@@ -141,7 +141,11 @@ export const getDriverById = async (req: Request, res: Response, next: NextFunct
 
 export const updateDriver = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { password, email, ...safeUpdates } = req.body;
+    // status is owned by the Trakzee sync — it says whether Trakzee still has
+    // this person on this truck, so setting it by hand claims something Trakzee
+    // does not, and the next run would overwrite it within five minutes anyway.
+    // Credentials have their own endpoint.
+    const { password, email, status, ...safeUpdates } = req.body;
     const driver = await Driver.findByIdAndUpdate(req.params.id, safeUpdates, { new: true });
     if (!driver) {
       res.status(404).json({ message: "Driver not found" });
@@ -166,66 +170,23 @@ export const deleteDriver = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// Bring the driver roster in line with what Trakzee reports, in ONE place.
+// Force a Trakzee sync now rather than waiting for the five-minute cron.
 //
-// The browser used to do this and could only ever insert, so a truck whose driver
-// changed kept both people. The decision lives in lib/driverReconcile (pure, and
-// tested); this only applies it and reports what happened, so a failure shows up
-// instead of vanishing into an unread Promise.allSettled the way the licenseNo
-// rejections did for eleven days.
+// The mirror itself lives in services/trakzeeSync and runs on a timer — this is
+// only the "do it now" button, used when a page has just been opened and the
+// admin wants the roster current. The caller sends nothing: the backend fetches
+// the feed itself, so the browser can no longer post a stale or partial fleet.
 export const syncTrakzeeDrivers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const vehicles = Array.isArray(req.body?.vehicles) ? req.body.vehicles : null;
-    if (!vehicles) { res.status(400).json({ message: "vehicles[] is required" }); return; }
-
-    const { planDriverSync } = await import("../lib/driverReconcile.js");
-    const Truck = (await import("../models/Truck.js")).default;
-
-    const [trucks, drivers] = await Promise.all([
-      Truck.find().select("truckId").lean(),
-      Driver.find().select("name assignedTruck status").lean(),
-    ]);
-
-    const plan = planDriverSync(vehicles, trucks as any, drivers as any);
-    const errors: string[] = [];
-
-    // Sequential on purpose: the batch is a handful of rows, and one failure must
-    // be attributable to the driver it belongs to rather than lost in a race.
-    const created: string[] = [];
-    for (const c of plan.create) {
-      try {
-        await new Driver({ name: c.name, phone: "--", experience: 0, status: "Active", assignedTruck: c.assignedTruck }).save();
-        created.push(c.name);
-      } catch (err: any) {
-        errors.push(`create "${c.name}": ${err?.message || err}`);
-      }
-    }
-
-    const retired: string[] = [];
-    for (const r of plan.retire) {
-      try {
-        await Driver.findByIdAndUpdate(r._id, { status: "Inactive" });
-        retired.push(`${r.name} (${r.plate})`);
-      } catch (err: any) {
-        errors.push(`retire "${r.name}": ${err?.message || err}`);
-      }
-    }
-
-    const reactivated: string[] = [];
-    for (const r of plan.reactivate) {
-      try {
-        await Driver.findByIdAndUpdate(r._id, { status: "Active" });
-        reactivated.push(`${r.name} (${r.plate})`);
-      } catch (err: any) {
-        errors.push(`reactivate "${r.name}": ${err?.message || err}`);
-      }
-    }
-
-    if (errors.length) console.error("[driver-sync] failures:", errors);
-    if (created.length || retired.length || reactivated.length) {
-      console.log(`[driver-sync] created=${created.length} retired=${retired.length} reactivated=${reactivated.length}`);
-    }
-
-    res.status(200).json({ created, retired, reactivated, errors });
+    const { runTrakzeeSync } = await import("../services/trakzeeSync.js");
+    const report = await runTrakzeeSync();
+    res.status(200).json({
+      created: report.driversCreated,
+      retired: report.driversRetired,
+      reactivated: report.driversReactivated,
+      trucksCreated: report.trucksCreated,
+      trucksRenamed: report.trucksRenamed,
+      errors: report.errors,
+    });
   } catch (error: any) { next(error); }
 };

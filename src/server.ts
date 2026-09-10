@@ -4,6 +4,7 @@ import app from './app.js';
 import connectDB from './config/db.js';
 import { initSocket } from './socket.js';
 import { startNightAlertCron } from './services/nightAlertService.js';
+import { startTrakzeeSyncCron } from './services/trakzeeSync.js';
 
 connectDB();
 
@@ -15,4 +16,5 @@ initSocket(httpServer);
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   startNightAlertCron();
+  startTrakzeeSyncCron();
 });

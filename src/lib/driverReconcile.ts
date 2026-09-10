@@ -21,6 +21,13 @@
  * only stops being offered for new work, which is exactly right for someone who is
  * no longer on that truck.
  *
+ * A truck Trakzee reports with NO driver retires whoever we still show on it. The
+ * roster mirrors Trakzee, and clearing a driver there is a deliberate act — leaving
+ * the old name behind makes the roster claim someone is on a truck they left. What
+ * this must never do is read a truck's ABSENCE from a response as "no driver": the
+ * feed drops vehicles in and out between calls, so only trucks it actually mentions
+ * are decided.
+ *
  * Pure on purpose: no database, no network, so the decision can be tested.
  */
 
@@ -86,9 +93,6 @@ export function planDriverSync(
   const handled = new Set<string>();
 
   for (const v of feed) {
-    const wanted = normName(v.driverName);
-    if (NOT_A_DRIVER.has(wanted)) continue;
-
     const truckId = truckIdByPlate.get(normPlate(v.plate));
     // A plate we have no truck for: the truck pass creates it, and the next run
     // picks the driver up. Guessing here would file the driver against nothing.
@@ -97,11 +101,15 @@ export function planDriverSync(
 
     const plate = normPlate(v.plate);
     const rows = rowsByTruck.get(truckId) ?? [];
-    const match = rows.find((d) => normName(d.name) === wanted);
+    const wanted = normName(v.driverName);
+    // Nobody on this truck: no row to match and none to create, so every row we
+    // still show on it falls through to the retire loop.
+    const manned = !NOT_A_DRIVER.has(wanted);
+    const match = manned ? rows.find((d) => normName(d.name) === wanted) : undefined;
 
-    if (!match) {
+    if (manned && !match) {
       plan.create.push({ name: String(v.driverName).trim().replace(/\s+/g, " "), assignedTruck: truckId });
-    } else if (match.status === "Inactive") {
+    } else if (match?.status === "Inactive") {
       plan.reactivate.push({ _id: String(match._id), name: match.name, plate });
     }
 

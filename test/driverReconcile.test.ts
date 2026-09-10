@@ -89,14 +89,58 @@ test("spacing and case differences are not treated as a different person or truc
   assert.deepEqual(plan.retire, []);
 });
 
-// A vehicle with nobody on it must not retire the driver we already know about —
-// Trakzee reports "No Driver" for a parked unit whose allocation is intact.
-test("a vehicle reporting no driver changes nothing", () => {
-  const rows = [{ _id: "d1", name: "Someone", assignedTruck: "t3", status: "Active" }];
+// The app mirrors Trakzee exactly: a truck Trakzee shows as driverless must not
+// keep showing whoever used to be on it. Clearing the driver in Trakzee is a
+// deliberate act, and leaving the old name behind makes the roster a lie.
+test("a vehicle reporting no driver retires whoever we still have on it", () => {
   for (const driverName of ["No Driver", "", "  ", "Driver not defined", "--"]) {
-    const plan = planDriverSync([{ plate: "AIF 1632", driverName }], TRUCKS, rows);
-    assert.deepEqual(plan, { create: [], retire: [], reactivate: [] }, driverName);
+    const plan = planDriverSync(
+      [{ plate: "AIF 1632", driverName }],
+      TRUCKS,
+      [{ _id: "d1", name: "Someone", assignedTruck: "t3", status: "Active" }]
+    );
+    assert.deepEqual(plan.retire, [{ _id: "d1", name: "Someone", plate: "AIF 1632" }], driverName);
+    assert.deepEqual(plan.create, [], driverName);
+    assert.deepEqual(plan.reactivate, [], driverName);
   }
+});
+
+test("a driverless vehicle we have no row for is simply left alone", () => {
+  const plan = planDriverSync([{ plate: "AIF 1632", driverName: "No Driver" }], TRUCKS, []);
+  assert.deepEqual(plan, { create: [], retire: [], reactivate: [] });
+});
+
+test("a driverless vehicle does not re-retire rows already retired", () => {
+  const plan = planDriverSync(
+    [{ plate: "AIF 1632", driverName: "No Driver" }],
+    TRUCKS,
+    [{ _id: "d1", name: "Someone", assignedTruck: "t3", status: "Inactive" }]
+  );
+  assert.deepEqual(plan.retire, []);
+});
+
+test("every row on a driverless vehicle is retired, not just the first", () => {
+  const plan = planDriverSync(
+    [{ plate: "AIF 1632", driverName: "--" }],
+    TRUCKS,
+    [
+      { _id: "d1", name: "One", assignedTruck: "t3", status: "Active" },
+      { _id: "d2", name: "Two", assignedTruck: "t3", status: "Active" },
+    ]
+  );
+  assert.deepEqual(plan.retire.map((r) => r._id), ["d1", "d2"]);
+});
+
+// Trakzee only tells us about the vehicles in its feed. A truck missing from a
+// given response — the feed drops vehicles in and out — must not be read as
+// "this truck has nobody on it".
+test("a truck absent from the feed is never retired", () => {
+  const plan = planDriverSync(
+    [{ plate: "BAV 7847", driverName: "Mike sinkala" }],
+    TRUCKS,
+    [{ _id: "d1", name: "Someone", assignedTruck: "t3", status: "Active" }]
+  );
+  assert.deepEqual(plan.retire, []);
 });
 
 // The same person legitimately drives two vehicles; those are two records by design.

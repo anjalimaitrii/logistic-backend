@@ -3,6 +3,13 @@ import mongoose, { Schema, Document } from "mongoose";
 export interface ITruck {
   truckId: string;
   /**
+   * The tracker's IMEI — the only stable identity a vehicle has. Trakzee lets a
+   * plate be edited, and matching on the plate turned one such rename into a
+   * second truck row for the same physical vehicle. Trucks stored before this
+   * existed have none until the sync matches them on plate once and fills it in.
+   */
+  imei?: string;
+  /**
    * The trailer's own registration. A rig is two separately registered vehicles
    * — the horse (truckId) pulls it — and the gate or weighbridge may check
    * either one, so the client is shown both.
@@ -63,6 +70,9 @@ export interface ITruck {
 const TruckSchema: Schema = new Schema(
   {
     truckId: { type: String, required: true, unique: true },
+    // Sparse: the trucks that predate this field have no value, and a plain
+    // unique index would reject every one of them past the first.
+    imei: { type: String, unique: true, sparse: true, default: undefined },
     // Not required: a rigid truck has no trailer, and the Trakzee import brings
     // none. Not unique either — a trailer can be re-registered onto another horse.
     trailerNumber: { type: String, default: "" },

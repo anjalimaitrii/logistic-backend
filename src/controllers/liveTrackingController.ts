@@ -214,20 +214,24 @@ export async function getFreshVehiclePosition(
   return getVehiclePosition(truckNumber);
 }
 
-export const getLiveVehicles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  console.log("[LiveTrack] GET /api/livetrack called");
-  try {
-    // Return in-memory cache if valid (10s TTL)
-    if (cachedLiveData && Date.now() < liveDataExpiry) {
-      console.log("[LiveTrack] ✓ Returning from memory cache");
-      res.set('Cache-Control', 'public, max-age=10');
-      res.set('X-Cache', 'HIT-MEMORY');
-      res.status(200).json(cachedLiveData);
-      return;
-    }
+/**
+ * The fleet as Trakzee has it right now, shared by the HTTP endpoint and the
+ * scheduled sync. Serves the 10s memory cache when it is warm, and falls back to
+ * the newest MongoDB snapshot when Trakzee is unreachable, so a caller never gets
+ * nothing when data exists.
+ */
+export async function fetchLiveFleet(): Promise<{ vehicles: any[]; source: 'trakzee' | 'cache' }> {
+  if (cachedLiveData?.vehicles?.length && Date.now() < liveDataExpiry) {
+    return { vehicles: cachedLiveData.vehicles, source: cachedLiveData.source ?? 'trakzee' };
+  }
+  const { vehicles, source } = await loadFleet();
+  cachedLiveData = { success: true, vehicles, count: vehicles.length, source };
+  liveDataExpiry = Date.now() + 10 * 1000;
+  return { vehicles, source };
+}
 
-    console.log("[LiveTrack] Memory cache miss, fetching fresh data...");
-
+async function loadFleet(): Promise<{ vehicles: any[]; source: 'trakzee' | 'cache' }> {
+  {
     let vehicles: any[] = [];
     let source: 'trakzee' | 'cache' = 'trakzee';
 
@@ -298,15 +302,19 @@ export const getLiveVehicles = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    const response = { success: true, vehicles, count: vehicles.length, source };
-    cachedLiveData = response;
-    liveDataExpiry = Date.now() + 10 * 1000; // 10 second memory cache
+    console.log(`[LiveTrack] ✓ Fleet loaded. Source: ${source}, Vehicles: ${vehicles.length}`);
+    return { vehicles, source };
+  }
+}
 
-    console.log(`[LiveTrack] ✓ Response ready. Source: ${source}, Vehicles: ${vehicles.length}`);
-
+export const getLiveVehicles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  console.log("[LiveTrack] GET /api/livetrack called");
+  try {
+    const warm = Boolean(cachedLiveData?.vehicles?.length && Date.now() < liveDataExpiry);
+    const { vehicles, source } = await fetchLiveFleet();
     res.set('Cache-Control', 'public, max-age=10');
-    res.set('X-Cache', source === 'trakzee' ? 'MISS-FRESH' : 'HIT-FALLBACK');
-    res.status(200).json(response);
+    res.set('X-Cache', warm ? 'HIT-MEMORY' : source === 'trakzee' ? 'MISS-FRESH' : 'HIT-FALLBACK');
+    res.status(200).json({ success: true, vehicles, count: vehicles.length, source });
   } catch (error: any) {
     console.error("[LiveTrack] ✗ FATAL ERROR:", error.message);
     console.error("[LiveTrack] Stack:", error.stack);
