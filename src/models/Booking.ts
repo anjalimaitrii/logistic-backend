@@ -39,6 +39,12 @@ export interface IBooking extends Document {
   // The ZRA (tax authority) invoice number printed on the client invoice. Issued
   // outside this system, so it is typed in when the invoice is raised.
   zraInvoiceNo?: string;
+  // The day the invoice was raised (first printed, or set by hand) — not the trip
+  // date. Stamped once so a reprint carries the same date.
+  invoiceDate?: Date;
+  // Client TPIN as printed on the invoice. Absent means the company record's
+  // TPIN is used; set when it was missing or wrong there at invoicing time.
+  invoiceTpin?: string;
   status: string;
   statusBeforePaid?: string; // status prior to being auto-marked "paid" by a ledger payment
   tripStatus?: string;
@@ -140,6 +146,8 @@ const BookingSchema: Schema = new Schema(
       default: [],
     },
     zraInvoiceNo: { type: String, default: "" },
+    invoiceDate: { type: Date },
+    invoiceTpin: { type: String },
     status: { type: String, default: "pending" },
     statusBeforePaid: { type: String },
     tripStatus: { type: String },
